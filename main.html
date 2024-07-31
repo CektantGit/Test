@@ -1,217 +1,107 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-  <head>
-    <meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'>
-    <meta name='mobile-web-app-capable' content='yes'>
-    <meta name='apple-mobile-web-app-capable' content='yes'>
-    <link rel='icon' type='image/png' sizes='32x32' href='favicon-32x32.png'>
-    <link rel='icon' type='image/png' sizes='96x96' href='favicon-96x96.png'>
-    <link rel='stylesheet' href='css/common.css'>
-    <title>Hit Test</title>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR with WebXR</title>
 
-    <!-- Import maps -->
-    <script type="importmap">
-      {
-        "imports": {
-          "WebXRButton": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/vr/WebXRButton.js",
-          "Scene": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/scene/Scene.js",
-          "Renderer": "https://cdn.jsdelivr.net/npm/three@0.152.2/src/renderers/WebGLRenderer.js",
-          "createWebGLContext": "https://cdn.jsdelivr.net/npm/three@0.152.2/src/renderers/WebGLRenderer.js",
-          "Node": "https://cdn.jsdelivr.net/npm/three@0.152.2/src/core/Object3D.js",
-          "DropShadowNode": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/shaders/Shadow.js",
-          "vec3": "https://cdn.jsdelivr.net/npm/gl-matrix@2.4.0/dist/gl-matrix.js",
-          "Ray": "https://cdn.jsdelivr.net/npm/gl-matrix@2.4.0/dist/gl-matrix.js"
-        }
-      }
-    </script>
-  </head>
-  <body>
-    <header>
-      <details open>
-        <summary>Hit Test</summary>
-        <p>
-          This sample demonstrates the use of hit testing to place virtual objects on real-world surfaces.
-          <a class="back" href="./">Back</a>
-        </p>
-      </details>
-    </header>
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
 
-    <div id="button-container">
-      <button id="create-plane">Создать плоскость</button>
-      <button id="get-info">Получить информацию</button>
-    </div>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <button onclick="activateXR()">Start AR</button>
 
-    <!-- This div will hold the WebXRButton -->
-    <div id="xr-button-container"></div>
+  <script>
+    async function activateXR() {
+      // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
+      const canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+      const gl = canvas.getContext('webgl', {xrCompatible: true});
+      
+      // Initialize a WebXR session using "immersive-ar".
+      const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test']});
+      session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
-    <script type="module">
-      import { WebXRButton } from 'WebXRButton';
-      import { Scene } from 'Scene';
-      import { Renderer, createWebGLContext } from 'Renderer';
-      import { Node } from 'Node';
-      import { vec3 } from 'vec3';
-      import { Ray } from 'Ray';
-      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js';
+      // Create a reference space for AR.
+      const referenceSpace = await session.requestReferenceSpace('local');
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      // XR globals.
-      let xrButton = null;
-      let xrRefSpace = null;
-      let xrViewerSpace = null;
-      let xrHitTestSource = null;
+      // Initialize Three.js
+      const renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
+      renderer.autoClear = false;
+      const camera = new THREE.PerspectiveCamera();
+      camera.matrixAutoUpdate = false;
+      const scene = new THREE.Scene();
+      
+      // Add a light source
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
+      directionalLight.position.set(10, 15, 10);
+      scene.add(directionalLight);
 
-      // WebGL scene globals.
-      let gl = null;
-      let renderer = null;
-      let scene = new Scene();
-      scene.enableStats(false);
-
-      let arObject = new Node();
-      arObject.visible = false;
-      scene.addNode(arObject);
-
-      // Create a plane of size 10x10 cm
-      let planeGeometry = new THREE.PlaneGeometry(0.1, 0.1); // 10x10 cm
-      let planeMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
-      let plane = new THREE.Mesh(planeGeometry, planeMaterial);
-
-      arObject.addNode(plane);
-
-      let reticleGeometry = new THREE.PlaneGeometry(0.05, 0.05); // 5x5 cm for reticle
-      let reticleMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide });
-      let reticle = new THREE.Mesh(reticleGeometry, reticleMaterial);
-      reticle.visible = false;
-      scene.addNode(reticle);
-
-      // Add a drop shadow if necessary (dummy implementation)
-      let shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), new THREE.ShadowMaterial({ opacity: 0.5 }));
-      shadow.position.z = -0.01; // Slightly behind the plane to create shadow effect
-      arObject.addNode(shadow);
-
-      const MAX_FLOWERS = 30;
-      let flowers = [];
-
-      scene.clear = false;
-
-      function initXR() {
-        xrButton = new WebXRButton({
-          onRequestSession: onRequestSession,
-          onEndSession: onEndSession,
-          textEnterXRTitle: "START AR",
-          textXRNotFoundTitle: "AR NOT FOUND",
-          textExitXRTitle: "EXIT AR",
-        });
-        document.getElementById('xr-button-container').appendChild(xrButton.domElement);
-
-        if (navigator.xr) {
-          navigator.xr.isSessionSupported('immersive-ar')
-            .then((supported) => {
-              xrButton.enabled = supported;
-            });
-        }
-      }
-
-      function onRequestSession() {
-        return navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local', 'hit-test'] })
-          .then((session) => {
-            xrButton.setSession(session);
-            onSessionStarted(session);
-          });
-      }
-
-      function onSessionStarted(session) {
-        session.addEventListener('end', onSessionEnded);
-        session.addEventListener('select', onSelect);
-
-        if (!gl) {
-          gl = createWebGLContext({
-            xrCompatible: true
-          });
-
-          renderer = new Renderer(gl);
-          scene.setRenderer(renderer);
-        }
-
-        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-
-        session.requestReferenceSpace('viewer').then((refSpace) => {
-          xrViewerSpace = refSpace;
-          session.requestHitTestSource({ space: xrViewerSpace }).then((hitTestSource) => {
-            xrHitTestSource = hitTestSource;
-          });
-        });
-
-        session.requestReferenceSpace('local').then((refSpace) => {
-          xrRefSpace = refSpace;
-          session.requestAnimationFrame(onXRFrame);
-        });
-      }
-
-      function onEndSession(session) {
-        xrHitTestSource.cancel();
-        xrHitTestSource = null;
-        session.end();
-      }
-
-      function onSessionEnded(event) {
-        xrButton.setSession(null);
-      }
-
-      function addARObjectAt(matrix) {
-        let newPlane = plane.clone();
-        newPlane.visible = true;
-        newPlane.matrix.fromArray(matrix);
-        scene.addNode(newPlane);
-
-        flowers.push(newPlane);
-
-        if (flowers.length > MAX_FLOWERS) {
-          let oldPlane = flowers.shift();
-          scene.removeNode(oldPlane);
-        }
-      }
-
-      let rayOrigin = vec3.create();
-      let rayDirection = vec3.create();
-      function onSelect(event) {
-        if (reticle.visible) {
-          addARObjectAt(reticle.matrix);
-        }
-      }
-
-      function onXRFrame(t, frame) {
-        let session = frame.session;
-        let pose = frame.getViewerPose(xrRefSpace);
-
+      // Add a reticle (crosshair) and a flower model
+      const loader = new THREE.GLTFLoader();
+      let reticle, flower;
+      
+      loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
+        reticle = gltf.scene;
         reticle.visible = false;
+        scene.add(reticle);
+      });
 
-        if (xrHitTestSource && pose) {
-          let hitTestResults = frame.getHitTestResults(xrHitTestSource);
-          if (hitTestResults.length > 0) {
-            let pose = hitTestResults[0].getPose(xrRefSpace);
-            reticle.visible = true;
-            reticle.matrix = pose.transform.matrix;
-          }
-        }
+      loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf', (gltf) => {
+        flower = gltf.scene;
+      });
 
-        scene.startFrame();
+      // Rendering loop
+      const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
-        scene.drawXRFrame(frame, pose);
-        scene.endFrame();
-      }
 
-      initXR();
+        // Bind the graphics framebuffer to the baseLayer's framebuffer
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-      // Add button functionality
-      document.getElementById('create-plane').addEventListener('click', () => {
-        console.log('Создать плоскость clicked');
-        // Placeholder for creating a plane functionality
+        // Get the viewer pose and update camera
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const view = pose.views[0];
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
+
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+
+          // Update the reticle position based on hit test results
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0 && reticle) {
+            const hitPose = hitTestResults[0].getPose(referenceSpace);
+            reticle.visible = true;
+            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
+            reticle.updateMatrixWorld(true);
+          }
+
+          // Render the scene with THREE.WebGLRenderer
+          renderer.render(scene, camera);
+        }
+      };
+
+      session.requestAnimationFrame(onXRFrame);
+
+      // Add interaction to place the flower
+      session.addEventListener('select', () => {
+        if (flower && reticle) {
+          const clone = flower.clone();
+          clone.position.copy(reticle.position);
+          scene.add(clone);
+        }
       });
-
-      document.getElementById('get-info').addEventListener('click', () => {
-        console.log('Получить информацию clicked');
-        // Placeholder for getting information functionality
-      });
-    </script>
-  </body>
+    }
+  </script>
+</body>
 </html>
