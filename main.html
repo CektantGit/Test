@@ -42,6 +42,9 @@
       <button id="get-info">Получить информацию</button>
     </div>
 
+    <!-- This div will hold the WebXRButton -->
+    <div id="xr-button-container"></div>
+
     <script type="module">
       import { WebXRButton } from 'WebXRButton';
       import { Scene } from 'Scene';
@@ -81,7 +84,6 @@
       scene.addNode(reticle);
 
       // Add a drop shadow if necessary (dummy implementation)
-      // Note: You might need to adjust the shadow implementation based on your actual needs
       let shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), new THREE.ShadowMaterial({ opacity: 0.5 }));
       shadow.position.z = -0.01; // Slightly behind the plane to create shadow effect
       arObject.addNode(shadow);
@@ -99,7 +101,7 @@
           textXRNotFoundTitle: "AR NOT FOUND",
           textExitXRTitle: "EXIT AR",
         });
-        document.querySelector('header').appendChild(xrButton.domElement);
+        document.getElementById('xr-button-container').appendChild(xrButton.domElement);
 
         if (navigator.xr) {
           navigator.xr.isSessionSupported('immersive-ar')
