@@ -41,11 +41,23 @@
       padding: 10px;
       border-radius: 5px;
     }
+    #startARBtn {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <!-- DOM overlay element for buttons -->
-  <div class="overlay">
+  <button id="startARBtn">Start AR</button>
+  <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
@@ -129,9 +141,22 @@
 
       session.requestAnimationFrame(onXRFrame);
 
+      // Hide the start button and show the overlay buttons
+      document.getElementById('startARBtn').style.display = 'none';
+      document.querySelector('.overlay').style.display = 'block';
+
       // Add event listeners for buttons
       document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
       document.getElementById('showInfoBtn').addEventListener('click', showInfo);
+    }
+
+    async function startAR() {
+      if (navigator.xr) {
+        // Start the AR session
+        await activateXR();
+      } else {
+        alert('WebXR not supported');
+      }
     }
 
     async function placeFlower() {
@@ -180,8 +205,8 @@
         `Camera to Gravity Angle: ${angle.toFixed(2)}°`;
     }
 
-    // Start the AR session with the overlay
-    activateXR().catch(console.error);
+    // Add event listener for the start button
+    document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
