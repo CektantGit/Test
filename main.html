@@ -19,13 +19,13 @@
   {
     "imports": {
       "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
-      "three/examples/jsm/webxr/ARButton": "https://unpkg.com/three@0.165.0/examples/jsm/webxr/ARButton.js"
+      "ARButton": "https://unpkg.com/three@0.165.0/examples/jsm/webxr/ARButton.js"
     }
   }
   </script>
   <script type="module">
     import * as THREE from 'three';
-    import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
+    import { ARButton } from 'ARButton';
 
     let scene, camera, renderer, reticle;
     let hitTestSource = null;
