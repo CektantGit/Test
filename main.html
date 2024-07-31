@@ -8,16 +8,53 @@
   <!-- Three.js -->
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/js/vr/ARButton.js"></script>
 
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
+
+    /* Styles for the overlay buttons */
+    .overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    .button {
+      display: block;
+      margin: 5px 0;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .info {
+      position: absolute;
+      top: 10px;
+      left: 150px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+    }
   </style>
 </head>
 <body>
-  <button onclick="activateXR()">Start AR</button>
+  <!-- DOM overlay element for buttons -->
+  <div class="overlay">
+    <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
+    <button class="button" id="showInfoBtn">Show Info</button>
+  </div>
+  <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
+    let flower, reticle, camera, scene, renderer, session;
+    let flowerPlaced = false;
+
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
@@ -25,7 +62,7 @@
       const gl = canvas.getContext('webgl', {xrCompatible: true});
       
       // Initialize a WebXR session using "immersive-ar".
-      const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test']});
+      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
       // Create a reference space for AR.
@@ -34,11 +71,11 @@
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
       // Initialize Three.js
-      const renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
+      renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
       renderer.autoClear = false;
-      const camera = new THREE.PerspectiveCamera();
+      camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
-      const scene = new THREE.Scene();
+      scene = new THREE.Scene();
       
       // Add a light source
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
@@ -47,7 +84,6 @@
 
       // Add a reticle (crosshair) and a flower model
       const loader = new THREE.GLTFLoader();
-      let reticle, flower;
       
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
@@ -93,15 +129,59 @@
 
       session.requestAnimationFrame(onXRFrame);
 
-      // Add interaction to place the flower
-      session.addEventListener('select', () => {
-        if (flower && reticle) {
-          const clone = flower.clone();
-          clone.position.copy(reticle.position);
-          scene.add(clone);
-        }
-      });
+      // Add event listeners for buttons
+      document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
+      document.getElementById('showInfoBtn').addEventListener('click', showInfo);
     }
+
+    async function placeFlower() {
+      if (!flower) return;
+
+      if (!flowerPlaced) {
+        // Clone the flower and place it at reticle position
+        const flowerClone = flower.clone();
+        flowerClone.position.copy(reticle.position);
+        flowerClone.name = 'sunflower';
+        scene.add(flowerClone);
+        flowerPlaced = true;
+      } else {
+        // Move the existing flower to the reticle position
+        const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+        if (flowerInScene) {
+          flowerInScene.position.copy(reticle.position);
+        }
+      }
+    }
+
+    function showInfo() {
+      if (!flowerPlaced) {
+        document.getElementById('info').innerText = 'Flower not placed yet.';
+        return;
+      }
+
+      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+      if (!flowerInScene) {
+        document.getElementById('info').innerText = 'Flower not found.';
+        return;
+      }
+
+      // Calculate Z distance between the flower and the camera
+      const distanceZ = flowerInScene.position.z - camera.position.z;
+      
+      // Calculate angle between camera forward vector and gravity direction
+      const cameraDirection = new THREE.Vector3();
+      camera.getWorldDirection(cameraDirection);
+      const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
+      const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
+
+      // Display information
+      document.getElementById('info').innerText = 
+        `Distance Z: ${distanceZ.toFixed(2)}\n` +
+        `Camera to Gravity Angle: ${angle.toFixed(2)}°`;
+    }
+
+    // Start the AR session with the overlay
+    activateXR().catch(console.error);
   </script>
 </body>
 </html>
