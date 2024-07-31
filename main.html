@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR with DOM Overlay</title>
+  <title>WebXR AR Plane Debugging</title>
   <style>
     body { margin: 0; overflow: hidden; }
     #startARButton {
@@ -24,7 +24,6 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 10;
-      /*display: none; /* Изначально скрыто */
       gap: 10px;
     }
     #cameraInfo {
@@ -57,7 +56,6 @@
 
   <!-- Интерфейсные элементы для AR (DOM Overlay) -->
   <div id="ui">
-    <button id="createPlane">Создать плоскость</button>
     <button id="getCameraInfo">Получить информацию о камере</button>
   </div>
   <div id="cameraInfo"></div>
@@ -74,11 +72,10 @@
     import * as THREE from 'three';
     import { ARButton } from 'ARButton';
 
-    let scene, camera, renderer, reticle;
+    let scene, camera, renderer;
     let hitTestSource = null;
     let hitTestSourceRequested = false;
-    let plane = null;
-    let planeCreated = false;  // Флаг для проверки, была ли создана плоскость
+    let planes = []; // Хранение всех созданных плоскостей
 
     async function init() {
       scene = new THREE.Scene();
@@ -96,44 +93,22 @@
         domOverlay: { root: document.body }
       }));
 
-      // Обработчики событий для кнопок внутри AR
-      document.getElementById('createPlane').addEventListener('click', createPlane);
-      document.getElementById('getCameraInfo').addEventListener('click', getCameraInfo);
-
       window.addEventListener('resize', onWindowResize, false);
     }
 
-    async function createPlane() {
+    function createPlane(hitMatrix) {
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.5, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide })
+      );
+      plane.matrix.fromArray(hitMatrix);
+      plane.position.setFromMatrixPosition(plane.matrix);
+      plane.rotation.setFromRotationMatrix(plane.matrix);
+      scene.add(plane);
+      planes.push(plane);
 
-        planeCreated = true; // Отмечаем, что плоскость создана
-        plane = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.5, 0.5),
-          new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide })
-        );
-        plane.position.setFromMatrixPosition(reticle.matrix);
-        plane.rotation.setFromRotationMatrix(reticle.matrix);
-        scene.add(plane);
-      
-    }
-
-    function getCameraInfo() {
-      const quaternion = camera.quaternion.clone();
-      const rotation = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
-      const angleToGravity = Math.abs(rotation.x * (180 / Math.PI));
-
-      const cameraInfoElement = document.getElementById('cameraInfo');
-      
-      if (plane) {
-        const planeWorldPosition = new THREE.Vector3();
-        plane.getWorldPosition(planeWorldPosition);
-        const zDifference = Math.abs(camera.position.z - planeWorldPosition.z);
-        cameraInfoElement.innerHTML = `
-          Угол камеры относительно гравитации: ${angleToGravity.toFixed(2)}°<br>
-          Разница по Z: ${zDifference.toFixed(2)}
-        `;
-      } else {
-        cameraInfoElement.innerHTML = `Плоскость не создана.`;
-      }
+      // Отладочный вывод информации о плоскости
+      console.log(`Плоскость создана в позиции: ${plane.position.x}, ${plane.position.y}, ${plane.position.z}`);
     }
 
     function onWindowResize() {
@@ -171,11 +146,10 @@
 
           if (hitTestResults.length) {
             const hit = hitTestResults[0];
+            const hitPose = hit.getPose(referenceSpace).transform;
 
-            reticle.visible = true;
-            reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-          } else {
-            reticle.visible = false;
+            // Создаем новую плоскость при каждом успешном попадании
+            createPlane(hitPose.matrix);
           }
         }
       }
