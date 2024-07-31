@@ -6,8 +6,9 @@
   <title>WebXR AR Example</title>
   <style>
     body { margin: 0; overflow: hidden; }
-    #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1; color: white; }
-    button { margin: 10px; padding: 10px; }
+    #info { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1; color: white; }
+    #cameraInfo { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 1; color: blue; }
+    button { margin: 10px; padding: 10px; z-index: 1; }
   </style>
 </head>
 <body>
@@ -15,6 +16,7 @@
     <button id="createPlane">Создать плоскость</button>
     <button id="getCameraInfo">Получить информацию о камере</button>
   </div>
+  <div id="cameraInfo"></div>
   <script type="importmap">
   {
     "imports": {
@@ -31,6 +33,7 @@
     let hitTestSource = null;
     let hitTestSourceRequested = false;
     let plane = null;
+    let planeCreated = false;  // Флаг для проверки, была ли создана плоскость
 
     init();
     animate();
@@ -70,10 +73,8 @@
     }
 
     function createPlane() {
-      if (reticle.visible) {
-        if (plane) {
-          scene.remove(plane);
-        }
+      if (reticle.visible && !planeCreated) {
+        planeCreated = true; // Отмечаем, что плоскость создана
         plane = new THREE.Mesh(
           new THREE.PlaneGeometry(0.5, 0.5),
           new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide })
@@ -88,15 +89,19 @@
       const quaternion = camera.quaternion.clone();
       const rotation = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
       const angleToGravity = Math.abs(rotation.x * (180 / Math.PI));
+
+      const cameraInfoElement = document.getElementById('cameraInfo');
       
       if (plane) {
         const planeWorldPosition = new THREE.Vector3();
         plane.getWorldPosition(planeWorldPosition);
         const zDifference = Math.abs(camera.position.z - planeWorldPosition.z);
-        console.log('Камера относительно гравитации:', angleToGravity.toFixed(2));
-        console.log('Разница по Z:', zDifference.toFixed(2));
+        cameraInfoElement.innerHTML = `
+          Угол камеры относительно гравитации: ${angleToGravity.toFixed(2)}°<br>
+          Разница по Z: ${zDifference.toFixed(2)}
+        `;
       } else {
-        console.log('Плоскость не создана.');
+        cameraInfoElement.innerHTML = `Плоскость не создана.`;
       }
     }
 
