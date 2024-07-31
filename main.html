@@ -3,26 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR Example with UI</title>
+  <title>WebXR AR Example with DOM UI</title>
   <style>
     body { margin: 0; overflow: hidden; }
     #ui {
-      position: absolute;
+      position: fixed;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10; /* Должен быть выше AR-контента */
-      color: white;
+      z-index: 10; /* Убедитесь, что UI находится выше AR-контента */
       display: flex;
       flex-direction: column;
       align-items: center;
     }
     #cameraInfo {
-      position: absolute;
+      position: fixed;
       bottom: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10; /* Должен быть выше AR-контента */
+      z-index: 10; /* Убедитесь, что UI находится выше AR-контента */
       color: blue;
     }
     button {
@@ -45,6 +44,7 @@
     <button id="getCameraInfo">Получить информацию о камере</button>
   </div>
   <div id="cameraInfo"></div>
+
   <script type="importmap">
   {
     "imports": {
@@ -90,6 +90,7 @@
 
       window.addEventListener('resize', onWindowResize, false);
 
+      // Обработчики событий для кнопок
       document.getElementById('createPlane').addEventListener('click', createPlane);
       document.getElementById('getCameraInfo').addEventListener('click', getCameraInfo);
     }
