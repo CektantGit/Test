@@ -3,16 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR Example</title>
+  <title>WebXR AR Example with UI</title>
   <style>
     body { margin: 0; overflow: hidden; }
-    #info { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1; color: white; }
-    #cameraInfo { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 1; color: blue; }
-    button { margin: 10px; padding: 10px; z-index: 1; }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10; /* Должен быть выше AR-контента */
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #cameraInfo {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10; /* Должен быть выше AR-контента */
+      color: blue;
+    }
+    button {
+      margin: 10px;
+      padding: 10px;
+      background-color: #333;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #555;
+    }
   </style>
 </head>
 <body>
-  <div id="info">
+  <div id="ui">
     <button id="createPlane">Создать плоскость</button>
     <button id="getCameraInfo">Получить информацию о камере</button>
   </div>
