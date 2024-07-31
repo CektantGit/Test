@@ -3,29 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR Example with DOM UI</title>
+  <title>WebXR AR with DOM Overlay</title>
   <style>
     body { margin: 0; overflow: hidden; }
     #ui {
-      position: fixed;
+      position: absolute;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10; /* Убедитесь, что UI находится выше AR-контента */
+      z-index: 10; /* Интерфейс поверх AR-контента */
       display: flex;
-      flex-direction: column;
-      align-items: center;
+      gap: 10px;
     }
     #cameraInfo {
-      position: fixed;
+      position: absolute;
       bottom: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10; /* Убедитесь, что UI находится выше AR-контента */
+      z-index: 10; /* Интерфейс поверх AR-контента */
       color: blue;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      border-radius: 5px;
     }
     button {
-      margin: 10px;
       padding: 10px;
       background-color: #333;
       color: #fff;
@@ -39,6 +40,7 @@
   </style>
 </head>
 <body>
+  <!-- Интерфейсные элементы -->
   <div id="ui">
     <button id="createPlane">Создать плоскость</button>
     <button id="getCameraInfo">Получить информацию о камере</button>
@@ -63,10 +65,7 @@
     let plane = null;
     let planeCreated = false;  // Флаг для проверки, была ли создана плоскость
 
-    init();
-    animate();
-
-    function init() {
+    async function init() {
       scene = new THREE.Scene();
 
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
@@ -75,10 +74,14 @@
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
-      document.body.appendChild(renderer.domElement);
 
-      // Добавление ARButton для входа в режим AR
-      document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+      // Запрос на создание сессии AR с включенным DOM Overlay
+      const session = await navigator.xr.requestSession('immersive-ar', {
+        optionalFeatures: ['dom-overlay'],
+        domOverlay: { root: document.body } // Указываем root для DOM Overlay
+      });
+      renderer.xr.setSession(session);
+      document.body.appendChild(renderer.domElement);
 
       reticle = new THREE.Mesh(
         new THREE.RingGeometry(0.05, 0.06, 32).rotateX(- Math.PI / 2),
@@ -174,6 +177,9 @@
 
       renderer.render(scene, camera);
     }
+
+    init();
+    animate();
   </script>
 </body>
 </html>
