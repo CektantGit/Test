@@ -90,8 +90,11 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
 
-      // Обработчик для кнопки "Старт AR"
-      document.getElementById('startARButton').addEventListener('click', startAR);
+      // Кнопка для старта AR с настройкой DOM Overlay
+      document.body.appendChild(ARButton.createButton(renderer, {
+        optionalFeatures: ['dom-overlay', 'dom-overlay-for-handheld-ar'],
+        domOverlay: { root: document.body }
+      }));
 
       // Обработчики событий для кнопок внутри AR
       document.getElementById('createPlane').addEventListener('click', createPlane);
@@ -100,38 +103,7 @@
       window.addEventListener('resize', onWindowResize, false);
     }
 
-    async function startAR() {
-      // Запрос на создание сессии AR с включенным DOM Overlay
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        optionalFeatures: ['dom-overlay'],
-        domOverlay: { root: document.body } // Указываем root для DOM Overlay
-      });
-
-      // Настройка рендерера с сессией
-      renderer.xr.setSession(session);
-      document.body.appendChild(renderer.domElement);
-
-      // Показываем элементы интерфейса поверх AR
-      document.getElementById('ui').style.display = 'flex';
-
-      // Настройка ретикулы
-      reticle = new THREE.Mesh(
-        new THREE.RingGeometry(0.05, 0.1, 32).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 })
-      );
-      scene.add(reticle);
-
-      // Начало анимации
-      animate();
-    }
-
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-
-    function createPlane() {
+    async function createPlane() {
       if (reticle.visible && !planeCreated) {
         planeCreated = true; // Отмечаем, что плоскость создана
         plane = new THREE.Mesh(
@@ -162,6 +134,12 @@
       } else {
         cameraInfoElement.innerHTML = `Плоскость не создана.`;
       }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
     function animate() {
@@ -205,7 +183,7 @@
       renderer.render(scene, camera);
     }
 
-    init();
+    init().then(animate);
   </script>
 </body>
 </html>
