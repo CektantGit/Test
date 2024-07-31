@@ -6,13 +6,25 @@
   <title>WebXR AR with DOM Overlay</title>
   <style>
     body { margin: 0; overflow: hidden; }
+    #startARButton {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background-color: #333;
+      color: #fff;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
     #ui {
       position: absolute;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10; /* Интерфейс поверх AR-контента */
-      display: flex;
+      z-index: 10;
+      display: none; /* Изначально скрыто */
       gap: 10px;
     }
     #cameraInfo {
@@ -20,7 +32,7 @@
       bottom: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10; /* Интерфейс поверх AR-контента */
+      z-index: 10;
       color: blue;
       background: rgba(0, 0, 0, 0.5);
       padding: 10px;
@@ -40,7 +52,10 @@
   </style>
 </head>
 <body>
-  <!-- Интерфейсные элементы -->
+  <!-- Кнопка для старта AR -->
+  <button id="startARButton">Старт AR</button>
+
+  <!-- Интерфейсные элементы для AR (DOM Overlay) -->
   <div id="ui">
     <button id="createPlane">Создать плоскость</button>
     <button id="getCameraInfo">Получить информацию о камере</button>
@@ -75,27 +90,32 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
 
+      // Обработчик для кнопки "Старт AR"
+      document.getElementById('startARButton').addEventListener('click', startAR);
+
+      // Обработчики событий для кнопок внутри AR
+      document.getElementById('createPlane').addEventListener('click', createPlane);
+      document.getElementById('getCameraInfo').addEventListener('click', getCameraInfo);
+
+      window.addEventListener('resize', onWindowResize, false);
+    }
+
+    async function startAR() {
       // Запрос на создание сессии AR с включенным DOM Overlay
       const session = await navigator.xr.requestSession('immersive-ar', {
         optionalFeatures: ['dom-overlay'],
         domOverlay: { root: document.body } // Указываем root для DOM Overlay
       });
+
+      // Настройка рендерера с сессией
       renderer.xr.setSession(session);
       document.body.appendChild(renderer.domElement);
 
-      reticle = new THREE.Mesh(
-        new THREE.RingGeometry(0.05, 0.06, 32).rotateX(- Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0xffffff })
-      );
-      reticle.matrixAutoUpdate = false;
-      reticle.visible = false;
-      scene.add(reticle);
+      // Показываем элементы интерфейса поверх AR
+      document.getElementById('ui').style.display = 'flex';
 
-      window.addEventListener('resize', onWindowResize, false);
-
-      // Обработчики событий для кнопок
-      document.getElementById('createPlane').addEventListener('click', createPlane);
-      document.getElementById('getCameraInfo').addEventListener('click', getCameraInfo);
+      // Начало анимации
+      animate();
     }
 
     function onWindowResize() {
@@ -179,7 +199,6 @@
     }
 
     init();
-    animate();
   </script>
 </body>
 </html>
