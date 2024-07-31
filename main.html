@@ -104,7 +104,7 @@
     }
 
     async function createPlane() {
-      if (reticle.visible && !planeCreated) {
+
         planeCreated = true; // Отмечаем, что плоскость создана
         plane = new THREE.Mesh(
           new THREE.PlaneGeometry(0.5, 0.5),
@@ -113,7 +113,7 @@
         plane.position.setFromMatrixPosition(reticle.matrix);
         plane.rotation.setFromRotationMatrix(reticle.matrix);
         scene.add(plane);
-      }
+      
     }
 
     function getCameraInfo() {
