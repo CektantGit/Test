@@ -135,11 +135,9 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
-
-                    if (flowerInScene) {
-            if (flowerPlaced) {
+          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+          if (flowerInScene) {
             zDistance = flowerInScene.position.z - pose.views[0].transform.position.z;
-            }
           }
 
           // Render the scene with THREE.WebGLRenderer
