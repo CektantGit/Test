@@ -137,7 +137,7 @@
           }
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
-            zDistance = flowerInScene.position.z - pose.views[0].transform.position.z;
+            zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
           }
 
           // Render the scene with THREE.WebGLRenderer
