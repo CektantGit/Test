@@ -189,9 +189,10 @@
         document.getElementById('info').innerText = 'Flower not found.';
         return;
       }
-
+      const pose = frame.getViewerPose(referenceSpace);
+      const position = xrPose.views[0].transform.position;
       // Calculate Z distance between the flower and the camera
-      const distanceZ = flowerInScene.position.y - camera.position.y;
+      const distanceZ = flowerInScene.position.y - position.y;
       
       // Calculate angle between camera forward vector and gravity direction
       const cameraDirection = new THREE.Vector3();
