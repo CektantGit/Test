@@ -191,13 +191,14 @@
       }
 
       // Calculate Z distance between the flower and the camera
-      const distanceZ = flowerInScene.position.z - camera.position.z;
+      const distanceZ = flowerInScene.position.y - camera.position.y;
       
       // Calculate angle between camera forward vector and gravity direction
       const cameraDirection = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
-      const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
+      const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
+      //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
 
       // Display information
       document.getElementById('info').innerText = 
