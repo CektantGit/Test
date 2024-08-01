@@ -66,7 +66,7 @@
   <script>
     let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
-    var referenceSpace;
+    var zDistance = 0;
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
@@ -78,7 +78,7 @@
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
       // Create a reference space for AR.
-      referenceSpace = await session.requestReferenceSpace('local');
+      const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
@@ -124,6 +124,8 @@
           camera.matrix.fromArray(view.transform.matrix);
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
+
+          zDistance = pose.views[0];
 
           // Update the reticle position based on hit test results
           const hitTestResults = frame.getHitTestResults(hitTestSource);
@@ -189,10 +191,10 @@
         document.getElementById('info').innerText = 'Flower not found.';
         return;
       }
-      const pose = frame.getViewerPose(referenceSpace);
-      const position = xrPose.views[0].transform.position;
+      //const pose = frame.getViewerPose(referenceSpace);
+      //const position = xrPose.views[0].transform.position;
       // Calculate Z distance between the flower and the camera
-      const distanceZ = flowerInScene.position.y - position.y;
+      //const distanceZ = flowerInScene.position.y - position.y;
       
       // Calculate angle between camera forward vector and gravity direction
       const cameraDirection = new THREE.Vector3();
@@ -203,7 +205,7 @@
 
       // Display information
       document.getElementById('info').innerText = 
-        `Distance Z: ${distanceZ.toFixed(2)}\n` +
+        `Distance Z: ${zDistance}\n` +
         `Camera to Gravity Angle: ${angle.toFixed(2)}°`;
     }
 
