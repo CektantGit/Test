@@ -125,7 +125,7 @@
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
 
-          zDistance = pose.views[0].transform.position;
+          zDistance = pose.views[0].transform.position.z;
 
           // Update the reticle position based on hit test results
           const hitTestResults = frame.getHitTestResults(hitTestSource);
