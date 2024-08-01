@@ -125,7 +125,9 @@
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
           if (flowerInScene) {
-            zDistance = flowerInScene.position.y - pose.views[0].transform.position.z;
+            if (flowerPlaced) {
+            zDistance = flowerInScene.position.z - pose.views[0].transform.position.z;
+            }
           }
           
 
