@@ -66,7 +66,7 @@
   <script>
     let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
-    var referenceSpace = await session.requestReferenceSpace('local');
+    var referenceSpace;
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
