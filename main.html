@@ -55,6 +55,16 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    #capturedImage {
+      position: absolute;
+      top: 10px;
+      left: 400px;
+      z-index: 10;
+      max-width: 300px;
+      max-height: 300px;
+      border: 2px solid white;
+      display: none; /* Initially hidden */
+    }
   </style>
 </head>
 <body>
@@ -64,6 +74,7 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
+  <img id="capturedImage" src="" alt="Captured Image">
 
   <script>
     let flower, reticle, camera, scene, renderer, session;
@@ -149,6 +160,8 @@
             // Захват изображения с камеры и сохранение в Blob
             captureCameraImage().then(blob => {
               imageBlob = blob;
+              const imageUrl = URL.createObjectURL(blob);
+              document.getElementById('capturedImage').src = imageUrl;
             });
           }
 
@@ -193,12 +206,14 @@
     function showInfo() {
       if (!flowerPlaced) {
         document.getElementById('info').innerText = 'Flower not placed yet.';
+        document.getElementById('capturedImage').style.display = 'none';
         return;
       }
 
       const flowerInScene = scene.children.find(child => child.name === 'sunflower');
       if (!flowerInScene) {
         document.getElementById('info').innerText = 'Flower not found.';
+        document.getElementById('capturedImage').style.display = 'none';
         return;
       }
 
@@ -210,39 +225,47 @@
       );
 
       const infoText = `Distance Z: ${zDistance}\n` +
-                       `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)\n` +
-                       `Image Blob: ${imageBlob ? 'Available' : 'Not Available'}`;
+                       `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
       document.getElementById('info').innerText = infoText;
+
+      // Отображаем изображение, если оно доступно
+      if (imageBlob) {
+        document.getElementById('capturedImage').style.display = 'block';
+      } else {
+        document.getElementById('capturedImage').style.display = 'none';
+      }
     }
 
-    async function captureCameraImage() {
-      // Создаем скрытый элемент видео для захвата изображения
-      const video = document.createElement('video');
-      video.autoplay = true;
-      video.style.display = 'none';
-      document.body.appendChild(video);
-
-      // Запрашиваем доступ к камере
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      video.srcObject = stream;
-
+    function captureCameraImage() {
       return new Promise((resolve) => {
-        video.onloadedmetadata = () => {
-          // Создаем холст для захвата изображения
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const context = canvas.getContext('2d');
-          context.drawImage(video, 0, 0);
+        // Используем VideoCapture API или другую реализацию захвата изображения
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.style.display = 'none';
+        document.body.appendChild(video);
 
-          // Создаем Blob изображения и возвращаем его
-          canvas.toBlob(blob => {
-            video.srcObject.getTracks().forEach(track => track.stop()); // Останавливаем видеопоток
-            document.body.removeChild(video);
-            resolve(blob);
-          });
-        };
+        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+          video.srcObject = stream;
+          video.onloadedmetadata = () => {
+            video.play();
+            setTimeout(() => {
+              // Создание canvas и захват изображения
+              const canvas = document.createElement('canvas');
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const context = canvas.getContext('2d');
+              context.drawImage(video, 0, 0);
+
+              // Создание Blob изображения и возвращение
+              canvas.toBlob(blob => {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                document.body.removeChild(video);
+                resolve(blob);
+              });
+            }, 1000); // Дайте время для захвата изображения
+          };
+        });
       });
     }
 
