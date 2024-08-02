@@ -73,9 +73,9 @@
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', {xrCompatible: true});
 
-      // Запрос на сессию AR с доступом к камере
+      // Request a session with camera access
       session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['camera-access'],
+        requiredFeatures: ['camera-access', 'hit-test', 'dom-overlay'],
         domOverlay: { root: document.body }
       });
 
@@ -83,8 +83,7 @@
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
       const referenceSpace = await session.requestReferenceSpace('local');
-      const viewerSpace = await session.requestReferenceSpace('viewer');
-      const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+      const hitTestSource = await session.requestHitTestSource({ space: referenceSpace });
 
       renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
       renderer.autoClear = false;
@@ -128,21 +127,6 @@
             reticle.visible = true;
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
-          }
-
-          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-          if (flowerInScene) {
-            zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
-
-            const cameraOrientation = pose.views[0].transform.orientation;
-            const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
-            const gravityVector = new THREE.Vector3(0, -1, 0);
-            const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
-            const angle = downVector.angleTo(gravityVector);
-            const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-            const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
           }
 
           renderer.render(scene, camera);
@@ -209,26 +193,28 @@
     }
 
     async function downloadImage() {
-      // Request the frame and camera image
+      if (!binding) {
+        console.error('XRWebGLBinding is not initialized.');
+        return;
+      }
+
       const frame = await session.requestAnimationFrame();
-      const viewerPose = frame.getViewerPose(await session.requestReferenceSpace('local'));
-      const view = viewerPose.views[0];
+      const pose = frame.getViewerPose(await session.requestReferenceSpace('local'));
+      const view = pose.views[0];
 
       if (view.camera) {
         const cameraTexture = binding.getCameraImage(view.camera);
 
-        // Create a new canvas and draw the camera image onto it
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
-        const width = view.camera.width;
-        const height = view.camera.height;
+        const width = cameraTexture.width;
+        const height = cameraTexture.height;
         canvas.width = width;
         canvas.height = height;
 
-        // Draw the image
-        context.drawImage(cameraTexture, 0, 0);
+        // Draw the camera image to the canvas
+        context.drawImage(cameraTexture.image, 0, 0, width, height);
 
-        // Create a download link
         const link = document.createElement('a');
         link.href = canvas.toDataURL('image/png');
         link.download = 'camera_image.png';
