@@ -13,6 +13,8 @@
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
+
+    /* Styles for the overlay buttons */
     .overlay {
       position: absolute;
       top: 10px;
@@ -51,17 +53,6 @@
       border-radius: 5px;
       cursor: pointer;
     }
-    /* Styles for the thumbnail */
-    .thumbnail {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      z-index: 10;
-    }
-    .thumbnail img {
-      width: 200px;
-      height: auto;
-    }
   </style>
 </head>
 <body>
@@ -69,29 +60,28 @@
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
     <button class="button" id="showInfoBtn">Show Info</button>
+    <button class="button" id="downloadImageBtn">Download Image</button> <!-- New button for downloading image -->
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
-  <div class="thumbnail" id="thumbnail" style="display: none;">
-    <img id="thumbnailImg" src="" alt="Thumbnail">
-  </div>
 
   <script>
-    let flower, reticle, camera, scene, renderer, session;
+    let flower, reticle, camera, scene, renderer, session, gl, binding;
     let flowerPlaced = false;
-    let zDistance = 0;
-    let rotationVector = new THREE.Vector3(0, 0, 0);
-    let imageData = null; // Global variable to store the captured image data
-    let dataURL = null;
+    var zDistance = 0;
+    var rotationVector = new THREE.Vector3(0, 0, 0);
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      const gl = canvas.getContext('webgl', {xrCompatible: true});
-      
+      gl = canvas.getContext('webgl', {xrCompatible: true});
+
+      // Requesting session with camera access
       session = await navigator.xr.requestSession('immersive-ar', {
         requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
         domOverlay: { root: document.body }
       });
+
+      binding = new XRWebGLBinding(session, gl);
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
       const referenceSpace = await session.requestReferenceSpace('local');
@@ -109,6 +99,7 @@
       scene.add(directionalLight);
 
       const loader = new THREE.GLTFLoader();
+      
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
         reticle.visible = false;
@@ -141,13 +132,13 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
+          
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
             const cameraOrientation = pose.views[0].transform.orientation;
             const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
-
             const gravityVector = new THREE.Vector3(0, -1, 0);
             const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
             const angle = downVector.angleTo(gravityVector);
@@ -158,29 +149,6 @@
           }
 
           renderer.render(scene, camera);
-
-          // Capture the camera image data
-          const layer = session.renderState.baseLayer;
-          const gl = layer.context;
-          const width = layer.viewport.width;
-          const height = layer.viewport.height;
-          imageData = new Uint8Array(width * height * 4);
-          
-          gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
-
-          // Создаем Canvas и получаем его контекст
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-
-          // Создаем ImageData объект и рисуем его на Canvas
-          const data = new ImageData(new Uint8ClampedArray(imageData), width, height);
-          ctx.putImageData(data, 0, 0);
-
-          // Преобразуем Canvas в Data URL
-          dataURL = canvas.toDataURL('image/png');
         }
       };
 
@@ -191,6 +159,7 @@
 
       document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
       document.getElementById('showInfoBtn').addEventListener('click', showInfo);
+      document.getElementById('downloadImageBtn').addEventListener('click', downloadImage);
     }
 
     async function startAR() {
@@ -230,7 +199,6 @@
         return;
       }
 
-      // Вывод информации
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
         rotationVector.x * radToDeg,
@@ -240,20 +208,35 @@
 
       document.getElementById('info').innerText = 
         `Distance Z: ${zDistance}\n` +
-        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)` +
-        `\n${dataURL ? 'Image URL is available' : 'No image available'}`;
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+    }
 
-      if (dataURL) {
-        // Создаем ссылку для скачивания
-        const link = document.createElement('a');
-        link.href = dataURL;
-        link.download = 'image.png'; // Имя файла для скачивания
-        document.body.appendChild(link);
-        link.click(); // Инициируем скачивание
-        document.body.removeChild(link); // Удаляем ссылку из документа
-      } else {
-        alert('Image data is not available');
+    async function downloadImage() {
+      const gl = renderer.getContext();
+      const width = gl.canvas.width;
+      const height = gl.canvas.height;
+      const pixels = new Uint8Array(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const imageData = ctx.createImageData(width, height);
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        imageData.data[i] = pixels[i];       // R
+        imageData.data[i + 1] = pixels[i + 1]; // G
+        imageData.data[i + 2] = pixels[i + 2]; // B
+        imageData.data[i + 3] = pixels[i + 3]; // A
       }
+
+      ctx.putImageData(imageData, 0, 0);
+
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = 'ar_image.png';
+      link.click();
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
