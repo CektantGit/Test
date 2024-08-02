@@ -51,6 +51,14 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    #cameraImage {
+      position: absolute;
+      top: 50px;
+      left: 150px;
+      z-index: 20;
+      border: 1px solid black;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -60,6 +68,7 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
+  <img id="cameraImage" />
 
   <script>
     let flower, reticle, camera, scene, renderer, session;
@@ -153,19 +162,6 @@
             rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
           }
 
-          // Capture and use the camera image
-          const cameraImage = view.camera ? await view.camera.getImage() : null;
-          if (cameraImage) {
-            const cameraTexture = new THREE.Texture(cameraImage);
-            cameraTexture.needsUpdate = true;
-            // Use the texture for a specific purpose, e.g., display it on a plane
-            // For example:
-            // const geometry = new THREE.PlaneGeometry(1, 1);
-            // const material = new THREE.MeshBasicMaterial({ map: cameraTexture });
-            // const plane = new THREE.Mesh(geometry, material);
-            // scene.add(plane);
-          }
-
           // Render the scene with THREE.WebGLRenderer
           renderer.render(scene, camera);
         }
@@ -210,7 +206,7 @@
       }
     }
 
-    function showInfo() {
+    async function showInfo() {
       if (!flowerPlaced) {
         document.getElementById('info').innerText = 'Flower not placed yet.';
         return;
@@ -222,6 +218,18 @@
         return;
       }
 
+      // Capture the camera image
+      const cameraImage = document.getElementById('cameraImage');
+      const cameraStream = session.renderState.baseLayer.getVideoFrame();
+      if (cameraStream) {
+        const imageBitmap = await createImageBitmap(cameraStream);
+        cameraImage.src = URL.createObjectURL(imageBitmap);
+        cameraImage.style.display = 'block';
+      } else {
+        document.getElementById('info').innerText = 'Failed to capture camera image.';
+      }
+
+      // Display additional information
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
         rotationVector.x * radToDeg,
