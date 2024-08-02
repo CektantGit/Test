@@ -234,10 +234,21 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
       //const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
       //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
 
-    // Display information
-    document.getElementById('info').innerText = 
-      `Distance Z: ${zDistance}\n` +
-      `Camera to Gravity Angle: (${rotationVector.x.toFixed(2)}°, ${rotationVector.y.toFixed(2)}°, ${rotationVector.z.toFixed(2)}°)`;
+// Коэффициент перевода радианов в градусы
+const radToDeg = 180 / Math.PI;
+
+// Преобразование углов из радиан в градусы
+const rotationVectorDegrees = new THREE.Vector3(
+  rotationVector.x * radToDeg,
+  rotationVector.y * radToDeg,
+  rotationVector.z * radToDeg
+);
+
+// Display information
+document.getElementById('info').innerText = 
+  `Distance Z: ${zDistance}\n` +
+  `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+      
     }
 
     // Add event listener for the start button
