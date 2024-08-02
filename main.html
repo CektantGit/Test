@@ -67,6 +67,7 @@
     let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
     var zDistance = 0;
+    var rotationVector = new THREE.Vector3(0, 0, 0);
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
@@ -138,6 +139,32 @@
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
+
+
+            const cameraOrientation = pose.views[0].transform.orientation;
+const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+
+// Вектор, направленный вниз (гравитация)
+const gravityVector = new THREE.Vector3(0, -1, 0);
+
+// Вектор, указывающий вниз относительно текущей ориентации камеры
+const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+
+// Вычисление угла между вектором камеры и гравитацией
+const angle = downVector.angleTo(gravityVector);
+
+// Определение оси вращения для выравнивания камеры с гравитацией
+const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+
+// Создание кватерниона для вращения камеры
+const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+
+// Преобразование кватерниона вращения в углы Эйлера
+const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
+
+// Вектор углов поворота
+ rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+
           }
 
           // Render the scene with THREE.WebGLRenderer
@@ -201,16 +228,16 @@
       //const distanceZ = flowerInScene.position.y - position.y;
       
       // Calculate angle between camera forward vector and gravity direction
-      const cameraDirection = new THREE.Vector3();
-      camera.getWorldDirection(cameraDirection);
-      const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
+      //const cameraDirection = new THREE.Vector3();
+      //camera.getWorldDirection(cameraDirection);
+      //const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
       //const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
-      const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
+      //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
 
-      // Display information
-      document.getElementById('info').innerText = 
-        `Distance Z: ${zDistance}\n` +
-        `Camera to Gravity Angle: ${angle.toFixed(2)}°`;
+    // Display information
+    document.getElementById('info').innerText = 
+      `Distance Z: ${zDistance}\n` +
+      `Camera to Gravity Angle: (${rotationVector.x.toFixed(2)}°, ${rotationVector.y.toFixed(2)}°, ${rotationVector.z.toFixed(2)}°)`;
     }
 
     // Add event listener for the start button
