@@ -40,6 +40,8 @@
       color: white;
       padding: 10px;
       border-radius: 5px;
+      max-width: 300px;
+      word-wrap: break-word;
     }
     #startARBtn {
       position: absolute;
@@ -68,36 +70,32 @@
     let flowerPlaced = false;
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
+    var imageBlob = null; // Для хранения изображения
+
     async function activateXR() {
-      // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', {xrCompatible: true});
-      
-      // Initialize a WebXR session using "immersive-ar".
+
       session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
-      // Create a reference space for AR.
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      // Initialize Three.js
       renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
-      
-      // Add a light source
+
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
 
-      // Add a reticle (crosshair) and a flower model
       const loader = new THREE.GLTFLoader();
-      
+
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
         reticle.visible = false;
@@ -108,14 +106,11 @@
         flower = gltf.scene;
       });
 
-      // Rendering loop
       const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
 
-        // Bind the graphics framebuffer to the baseLayer's framebuffer
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-        // Get the viewer pose and update camera
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
           const view = pose.views[0];
@@ -125,10 +120,7 @@
           camera.matrix.fromArray(view.transform.matrix);
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
-          
-          
 
-          // Update the reticle position based on hit test results
           const hitTestResults = frame.getHitTestResults(hitTestSource);
           if (hitTestResults.length > 0 && reticle) {
             const hitPose = hitTestResults[0].getPose(referenceSpace);
@@ -136,56 +128,45 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
+
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
-
             const cameraOrientation = pose.views[0].transform.orientation;
-const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+            const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
 
-// Вектор, направленный вниз (гравитация)
-const gravityVector = new THREE.Vector3(0, -1, 0);
+            const gravityVector = new THREE.Vector3(0, -1, 0);
+            const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
 
-// Вектор, указывающий вниз относительно текущей ориентации камеры
-const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+            const angle = downVector.angleTo(gravityVector);
+            const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+            const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
 
-// Вычисление угла между вектором камеры и гравитацией
-const angle = downVector.angleTo(gravityVector);
+            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
 
-// Определение оси вращения для выравнивания камеры с гравитацией
-const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-
-// Создание кватерниона для вращения камеры
-const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-
-// Преобразование кватерниона вращения в углы Эйлера
-const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-
-// Вектор углов поворота
- rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
-
+            // Захват изображения с камеры и сохранение в Blob
+            captureCameraImage().then(blob => {
+              imageBlob = blob;
+            });
           }
 
-          // Render the scene with THREE.WebGLRenderer
           renderer.render(scene, camera);
         }
       };
 
       session.requestAnimationFrame(onXRFrame);
 
-      // Hide the start button and show the overlay buttons
       document.getElementById('startARBtn').style.display = 'none';
       document.querySelector('.overlay').style.display = 'block';
 
-      // Add event listeners for buttons
       document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
       document.getElementById('showInfoBtn').addEventListener('click', showInfo);
     }
 
     async function startAR() {
       if (navigator.xr) {
-        // Start the AR session
         await activateXR();
       } else {
         alert('WebXR not supported');
@@ -196,14 +177,12 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
       if (!flower) return;
 
       if (!flowerPlaced) {
-        // Clone the flower and place it at reticle position
         const flowerClone = flower.clone();
         flowerClone.position.copy(reticle.position);
         flowerClone.name = 'sunflower';
         scene.add(flowerClone);
         flowerPlaced = true;
       } else {
-        // Move the existing flower to the reticle position
         const flowerInScene = scene.children.find(child => child.name === 'sunflower');
         if (flowerInScene) {
           flowerInScene.position.copy(reticle.position);
@@ -222,36 +201,51 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
         document.getElementById('info').innerText = 'Flower not found.';
         return;
       }
-      //const pose = frame.getViewerPose(referenceSpace);
-      //const position = xrPose.views[0].transform.position;
-      // Calculate Z distance between the flower and the camera
-      //const distanceZ = flowerInScene.position.y - position.y;
-      
-      // Calculate angle between camera forward vector and gravity direction
-      //const cameraDirection = new THREE.Vector3();
-      //camera.getWorldDirection(cameraDirection);
-      //const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
-      //const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
-      //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
 
-// Коэффициент перевода радианов в градусы
-const radToDeg = 180 / Math.PI;
+      const radToDeg = 180 / Math.PI;
+      const rotationVectorDegrees = new THREE.Vector3(
+        rotationVector.x * radToDeg,
+        rotationVector.y * radToDeg,
+        rotationVector.z * radToDeg
+      );
 
-// Преобразование углов из радиан в градусы
-const rotationVectorDegrees = new THREE.Vector3(
-  rotationVector.x * radToDeg,
-  rotationVector.y * radToDeg,
-  rotationVector.z * radToDeg
-);
+      const infoText = `Distance Z: ${zDistance}\n` +
+                       `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)\n` +
+                       `Image Blob: ${imageBlob ? 'Available' : 'Not Available'}`;
 
-// Display information
-document.getElementById('info').innerText = 
-  `Distance Z: ${zDistance}\n` +
-  `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-      
+      document.getElementById('info').innerText = infoText;
     }
 
-    // Add event listener for the start button
+    async function captureCameraImage() {
+      // Создаем скрытый элемент видео для захвата изображения
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.style.display = 'none';
+      document.body.appendChild(video);
+
+      // Запрашиваем доступ к камере
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          // Создаем холст для захвата изображения
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const context = canvas.getContext('2d');
+          context.drawImage(video, 0, 0);
+
+          // Создаем Blob изображения и возвращаем его
+          canvas.toBlob(blob => {
+            video.srcObject.getTracks().forEach(track => track.stop()); // Останавливаем видеопоток
+            document.body.removeChild(video);
+            resolve(blob);
+          });
+        };
+      });
+    }
+
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
 </body>
