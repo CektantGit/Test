@@ -78,8 +78,9 @@
   <script>
     let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
-    var zDistance = 0;
-    var rotationVector = new THREE.Vector3(0, 0, 0);
+    let zDistance = 0;
+    let rotationVector = new THREE.Vector3(0, 0, 0);
+    let imageData = null; // Global variable to store the captured image data
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
@@ -156,6 +157,18 @@
           }
 
           renderer.render(scene, camera);
+
+          // Capture the camera image data
+          if (session.updateRenderState) {
+            const layer = session.renderState.baseLayer;
+            const gl = layer.context;
+            const width = layer.viewport.width;
+            const height = layer.viewport.height;
+            imageData = new Uint8Array(width * height * 4);
+            
+            gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+            gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
+          }
         }
       };
 
@@ -193,7 +206,7 @@
       }
     }
 
-    async function showInfo() {
+    function showInfo() {
       if (!flowerPlaced) {
         document.getElementById('info').innerText = 'Flower not placed yet.';
         return;
@@ -205,25 +218,17 @@
         return;
       }
 
-      const layer = session.renderState.baseLayer;
-      const gl = layer.context;
-      const width = layer.viewport.width;
-      const height = layer.viewport.height;
-      const imageData = new Uint8Array(width * height * 4);
-      
-      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
-
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = session.renderState.baseLayer.viewport.width;
+      canvas.height = session.renderState.baseLayer.viewport.height;
       const ctx = canvas.getContext('2d');
-      const imageDataObject = new ImageData(new Uint8ClampedArray(imageData), width, height);
-      ctx.putImageData(imageDataObject, 0, 0);
-
-      const thumbnailImg = document.getElementById('thumbnailImg');
-      thumbnailImg.src = canvas.toDataURL();
-      document.getElementById('thumbnail').style.display = 'block';
+      if (imageData) {
+        const imageDataObject = new ImageData(new Uint8ClampedArray(imageData), canvas.width, canvas.height);
+        ctx.putImageData(imageDataObject, 0, 0);
+        const thumbnailImg = document.getElementById('thumbnailImg');
+        thumbnailImg.src = canvas.toDataURL();
+        document.getElementById('thumbnail').style.display = 'block';
+      }
 
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
