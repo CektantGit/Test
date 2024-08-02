@@ -51,13 +51,16 @@
       border-radius: 5px;
       cursor: pointer;
     }
-    #cameraImage {
+    /* Styles for the thumbnail */
+    .thumbnail {
       position: absolute;
-      top: 50px;
-      left: 150px;
-      z-index: 20;
-      border: 1px solid black;
-      display: none;
+      bottom: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    .thumbnail img {
+      width: 200px;
+      height: auto;
     }
   </style>
 </head>
@@ -68,48 +71,42 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
-  <img id="cameraImage" />
+  <div class="thumbnail" id="thumbnail" style="display: none;">
+    <img id="thumbnailImg" src="" alt="Thumbnail">
+  </div>
 
   <script>
     let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
-    let zDistance = 0;
-    let rotationVector = new THREE.Vector3(0, 0, 0);
-    var cameraStream;
+    var zDistance = 0;
+    var rotationVector = new THREE.Vector3(0, 0, 0);
 
     async function activateXR() {
-      // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', {xrCompatible: true});
       
-      // Initialize a WebXR session using "immersive-ar" and request camera access.
       session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['hit-test', 'camera-access', 'dom-overlay'],
+        requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
         domOverlay: { root: document.body }
       });
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
-      // Create a reference space for AR.
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      // Initialize Three.js
       renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
       
-      // Add a light source
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
 
-      // Add a reticle (crosshair) and a flower model
       const loader = new THREE.GLTFLoader();
-      
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
         reticle.visible = false;
@@ -120,14 +117,11 @@
         flower = gltf.scene;
       });
 
-      // Rendering loop
-      const onXRFrame = async (time, frame) => {
+      const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
 
-        // Bind the graphics framebuffer to the baseLayer's framebuffer
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-        // Get the viewer pose and update camera
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
           const view = pose.views[0];
@@ -137,8 +131,7 @@
           camera.matrix.fromArray(view.transform.matrix);
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
-          
-          // Update the reticle position based on hit test results
+
           const hitTestResults = frame.getHitTestResults(hitTestSource);
           if (hitTestResults.length > 0 && reticle) {
             const hitPose = hitTestResults[0].getPose(referenceSpace);
@@ -146,9 +139,6 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
-
-          cameraStream = session.renderState.baseLayer.getVideoFrame();
-
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
@@ -165,25 +155,21 @@
             rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
           }
 
-          // Render the scene with THREE.WebGLRenderer
           renderer.render(scene, camera);
         }
       };
 
       session.requestAnimationFrame(onXRFrame);
 
-      // Hide the start button and show the overlay buttons
       document.getElementById('startARBtn').style.display = 'none';
       document.querySelector('.overlay').style.display = 'block';
 
-      // Add event listeners for buttons
       document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
       document.getElementById('showInfoBtn').addEventListener('click', showInfo);
     }
 
     async function startAR() {
       if (navigator.xr) {
-        // Start the AR session
         await activateXR();
       } else {
         alert('WebXR not supported');
@@ -194,14 +180,12 @@
       if (!flower) return;
 
       if (!flowerPlaced) {
-        // Clone the flower and place it at reticle position
         const flowerClone = flower.clone();
         flowerClone.position.copy(reticle.position);
         flowerClone.name = 'sunflower';
         scene.add(flowerClone);
         flowerPlaced = true;
       } else {
-        // Move the existing flower to the reticle position
         const flowerInScene = scene.children.find(child => child.name === 'sunflower');
         if (flowerInScene) {
           flowerInScene.position.copy(reticle.position);
@@ -221,17 +205,26 @@
         return;
       }
 
-      // Capture the camera image
-      const cameraImage = document.getElementById('cameraImage');
-      if (cameraStream) {
-        const imageBitmap = await createImageBitmap(cameraStream);
-        cameraImage.src = URL.createObjectURL(imageBitmap);
-        cameraImage.style.display = 'block';
-      } else {
-        document.getElementById('info').innerText = 'Failed to capture camera image.';
-      }
+      const layer = session.renderState.baseLayer;
+      const gl = layer.context;
+      const width = layer.viewport.width;
+      const height = layer.viewport.height;
+      const imageData = new Uint8Array(width * height * 4);
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
 
-      // Display additional information
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const imageDataObject = new ImageData(new Uint8ClampedArray(imageData), width, height);
+      ctx.putImageData(imageDataObject, 0, 0);
+
+      const thumbnailImg = document.getElementById('thumbnailImg');
+      thumbnailImg.src = canvas.toDataURL();
+      document.getElementById('thumbnail').style.display = 'block';
+
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
         rotationVector.x * radToDeg,
@@ -244,7 +237,6 @@
         `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
     }
 
-    // Add event listener for the start button
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
 </body>
