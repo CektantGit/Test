@@ -81,6 +81,7 @@
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let imageData = null; // Global variable to store the captured image data
+    var dataURL = null;
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
@@ -181,15 +182,7 @@ if (session.updateRenderState) {
   ctx.putImageData(data, 0, 0);
 
   // Преобразуем Canvas в Data URL
-  const dataURL = canvas.toDataURL('image/png');
-
-  // Создаем ссылку для скачивания
-  const link = document.createElement('a');
-  link.href = dataURL;
-  link.download = 'image.png'; // Имя файла для скачивания
-  document.body.appendChild(link);
-  link.click(); // Инициируем скачивание
-  document.body.removeChild(link); // Удаляем ссылку из документа
+  dataURL = canvas.toDataURL('image/png');
 }
         }
       };
@@ -261,7 +254,17 @@ if (session.updateRenderState) {
 
       document.getElementById('info').innerText = 
         `Distance Z: ${zDistance}\n` +
-        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`+
+('${dataURL}');
+
+        // Создаем ссылку для скачивания
+  const link = document.createElement('a');
+  link.href = dataURL;
+  link.download = 'image.png'; // Имя файла для скачивания
+  document.body.appendChild(link);
+  link.click(); // Инициируем скачивание
+  document.body.removeChild(link); // Удаляем ссылку из документа
+      
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
