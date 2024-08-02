@@ -77,7 +77,7 @@
   <img id="capturedImage" src="" alt="Captured Image">
 
   <script>
-    let flower, reticle, camera, scene, renderer, session;
+    let flower, reticle, camera, scene, renderer, session, gl;
     let flowerPlaced = false;
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
@@ -86,7 +86,7 @@
     async function activateXR() {
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      const gl = canvas.getContext('webgl', {xrCompatible: true});
+      gl = canvas.getContext('webgl', {xrCompatible: true});
 
       session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
@@ -157,7 +157,7 @@
 
             rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
 
-            // Захват изображения с камеры и сохранение в Blob
+            // Захват изображения с AR камеры и сохранение в Blob
             captureCameraImage().then(blob => {
               imageBlob = blob;
               const imageUrl = URL.createObjectURL(blob);
@@ -225,11 +225,10 @@
       );
 
       const infoText = `Distance Z: ${zDistance}\n` +
-                       `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+                        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
       document.getElementById('info').innerText = infoText;
 
-      // Отображаем изображение, если оно доступно
       if (imageBlob) {
         document.getElementById('capturedImage').style.display = 'block';
       } else {
@@ -239,33 +238,25 @@
 
     function captureCameraImage() {
       return new Promise((resolve) => {
-        // Используем VideoCapture API или другую реализацию захвата изображения
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.style.display = 'none';
-        document.body.appendChild(video);
+        // Используем WebGL для захвата текущего кадра
+        const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+        const width = gl.drawingBufferWidth;
+        const height = gl.drawingBufferHeight;
 
-        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-          video.srcObject = stream;
-          video.onloadedmetadata = () => {
-            video.play();
-            setTimeout(() => {
-              // Создание canvas и захват изображения
-              const canvas = document.createElement('canvas');
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const context = canvas.getContext('2d');
-              context.drawImage(video, 0, 0);
+        const pixels = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-              // Создание Blob изображения и возвращение
-              canvas.toBlob(blob => {
-                video.srcObject.getTracks().forEach(track => track.stop());
-                document.body.removeChild(video);
-                resolve(blob);
-              });
-            }, 1000); // Дайте время для захвата изображения
-          };
-        });
+        // Создание canvas и отображение изображения
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        const imageData = context.createImageData(width, height);
+        imageData.data.set(pixels);
+        context.putImageData(imageData, 0, 0);
+
+        // Создание Blob изображения и возвращение
+        canvas.toBlob(blob => resolve(blob));
       });
     }
 
