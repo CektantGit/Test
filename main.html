@@ -13,8 +13,6 @@
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-
-    /* Styles for the overlay buttons */
     .overlay {
       position: absolute;
       top: 10px;
@@ -40,8 +38,6 @@
       color: white;
       padding: 10px;
       border-radius: 5px;
-      max-width: 300px;
-      word-wrap: break-word;
     }
     #startARBtn {
       position: absolute;
@@ -55,16 +51,6 @@
       border-radius: 5px;
       cursor: pointer;
     }
-    #capturedImage {
-      position: absolute;
-      top: 10px;
-      left: 400px;
-      z-index: 10;
-      max-width: 300px;
-      max-height: 300px;
-      border: 2px solid white;
-      display: none; /* Initially hidden */
-    }
   </style>
 </head>
 <body>
@@ -74,39 +60,39 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
-  <img id="capturedImage" src="" alt="Captured Image">
 
   <script>
-    let flower, reticle, camera, scene, renderer, session, gl;
+    let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
-    var zDistance = 0;
-    var rotationVector = new THREE.Vector3(0, 0, 0);
-    var imageBlob = null; // Для хранения изображения
+    let zDistance = 0;
+    let rotationVector = new THREE.Vector3(0, 0, 0);
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', {xrCompatible: true});
+      const gl = canvas.getContext('webgl', { xrCompatible: true });
 
-      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
-      session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['camera-access']
+      });
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
-
+      
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
 
       const loader = new THREE.GLTFLoader();
-
+      
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
         reticle.visible = false;
@@ -117,7 +103,7 @@
         flower = gltf.scene;
       });
 
-      const onXRFrame = (time, frame) => {
+      const onXRFrame = async (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
@@ -146,23 +132,27 @@
 
             const cameraOrientation = pose.views[0].transform.orientation;
             const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
-
             const gravityVector = new THREE.Vector3(0, -1, 0);
             const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
-
             const angle = downVector.angleTo(gravityVector);
             const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
             const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
             const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-
             rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+          }
 
-            // Захват изображения с AR камеры и сохранение в Blob
-            captureCameraImage().then(blob => {
-              imageBlob = blob;
-              const imageUrl = URL.createObjectURL(blob);
-              document.getElementById('capturedImage').src = imageUrl;
-            });
+          // Get the camera image if available
+          if (view.camera) {
+            const cameraImage = renderer.xr.getCameraImage(view.camera);
+            if (cameraImage) {
+              const cameraTexture = new THREE.WebGLTexture(cameraImage);
+              // Use the texture for a specific purpose, e.g., display it on a plane
+              // For example:
+              // const geometry = new THREE.PlaneGeometry(1, 1);
+              // const material = new THREE.MeshBasicMaterial({ map: cameraTexture });
+              // const plane = new THREE.Mesh(geometry, material);
+              // scene.add(plane);
+            }
           }
 
           renderer.render(scene, camera);
@@ -206,14 +196,12 @@
     function showInfo() {
       if (!flowerPlaced) {
         document.getElementById('info').innerText = 'Flower not placed yet.';
-        document.getElementById('capturedImage').style.display = 'none';
         return;
       }
 
       const flowerInScene = scene.children.find(child => child.name === 'sunflower');
       if (!flowerInScene) {
         document.getElementById('info').innerText = 'Flower not found.';
-        document.getElementById('capturedImage').style.display = 'none';
         return;
       }
 
@@ -224,40 +212,9 @@
         rotationVector.z * radToDeg
       );
 
-      const infoText = `Distance Z: ${zDistance}\n` +
-                        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
-      document.getElementById('info').innerText = infoText;
-
-      if (imageBlob) {
-        document.getElementById('capturedImage').style.display = 'block';
-      } else {
-        document.getElementById('capturedImage').style.display = 'none';
-      }
-    }
-
-    function captureCameraImage() {
-      return new Promise((resolve) => {
-        // Используем WebGL для захвата текущего кадра
-        const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
-        const width = gl.drawingBufferWidth;
-        const height = gl.drawingBufferHeight;
-
-        const pixels = new Uint8Array(width * height * 4);
-        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-
-        // Создание canvas и отображение изображения
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const context = canvas.getContext('2d');
-        const imageData = context.createImageData(width, height);
-        imageData.data.set(pixels);
-        context.putImageData(imageData, 0, 0);
-
-        // Создание Blob изображения и возвращение
-        canvas.toBlob(blob => resolve(blob));
-      });
+      document.getElementById('info').innerText = 
+        `Distance Z: ${zDistance}\n` +
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
