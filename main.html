@@ -4,17 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AR with WebXR</title>
-
+  
   <!-- Three.js -->
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/vr/ARButton.js"></script>
-
+  
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-
-    /* Styles for the overlay buttons */
     .overlay {
       position: absolute;
       top: 10px;
@@ -60,24 +58,24 @@
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
     <button class="button" id="showInfoBtn">Show Info</button>
-    <button class="button" id="downloadImageBtn">Download Image</button> <!-- New button for downloading image -->
+    <button class="button" id="downloadImageBtn">Download Image</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
-    let flower, reticle, camera, scene, renderer, session, gl, binding;
+    let flower, reticle, camera, scene, renderer, session, binding;
     let flowerPlaced = false;
-    var zDistance = 0;
-    var rotationVector = new THREE.Vector3(0, 0, 0);
+    let zDistance = 0;
+    let rotationVector = new THREE.Vector3(0, 0, 0);
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', {xrCompatible: true});
+      const gl = canvas.getContext('webgl', {xrCompatible: true});
 
-      // Requesting session with camera access
+      // Запрос на сессию AR с доступом к камере
       session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
+        requiredFeatures: ['camera-access'],
         domOverlay: { root: document.body }
       });
 
@@ -93,13 +91,12 @@
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
-      
+
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
 
       const loader = new THREE.GLTFLoader();
-      
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
         reticle.visible = false;
@@ -132,7 +129,7 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
-          
+
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
@@ -212,31 +209,33 @@
     }
 
     async function downloadImage() {
-      const gl = renderer.getContext();
-      const width = gl.canvas.width;
-      const height = gl.canvas.height;
-      const pixels = new Uint8Array(width * height * 4);
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      // Request the frame and camera image
+      const frame = await session.requestAnimationFrame();
+      const viewerPose = frame.getViewerPose(await session.requestReferenceSpace('local'));
+      const view = viewerPose.views[0];
 
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      const imageData = ctx.createImageData(width, height);
+      if (view.camera) {
+        const cameraTexture = binding.getCameraImage(view.camera);
 
-      for (let i = 0; i < pixels.length; i += 4) {
-        imageData.data[i] = pixels[i];       // R
-        imageData.data[i + 1] = pixels[i + 1]; // G
-        imageData.data[i + 2] = pixels[i + 2]; // B
-        imageData.data[i + 3] = pixels[i + 3]; // A
+        // Create a new canvas and draw the camera image onto it
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        const width = view.camera.width;
+        const height = view.camera.height;
+        canvas.width = width;
+        canvas.height = height;
+
+        // Draw the image
+        context.drawImage(cameraTexture, 0, 0);
+
+        // Create a download link
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = 'camera_image.png';
+        link.click();
+      } else {
+        console.error('No camera image available.');
       }
-
-      ctx.putImageData(imageData, 0, 0);
-
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
-      link.download = 'ar_image.png';
-      link.click();
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
