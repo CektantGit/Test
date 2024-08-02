@@ -81,7 +81,7 @@
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let imageData = null; // Global variable to store the captured image data
-    var dataURL = null;
+    let dataURL = null;
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
@@ -160,30 +160,27 @@
           renderer.render(scene, camera);
 
           // Capture the camera image data
-// Capture the camera image data
+          const layer = session.renderState.baseLayer;
+          const gl = layer.context;
+          const width = layer.viewport.width;
+          const height = layer.viewport.height;
+          imageData = new Uint8Array(width * height * 4);
+          
+          gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
 
-  const layer = session.renderState.baseLayer;
-  const gl = layer.context;
-  const width = layer.viewport.width;
-  const height = layer.viewport.height;
-  const imageData = new Uint8Array(width * height * 4);
-  
-  gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
+          // Создаем Canvas и получаем его контекст
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
 
-  // Создаем Canvas и получаем его контекст
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
+          // Создаем ImageData объект и рисуем его на Canvas
+          const data = new ImageData(new Uint8ClampedArray(imageData), width, height);
+          ctx.putImageData(data, 0, 0);
 
-  // Создаем ImageData объект и рисуем его на Canvas
-  const data = new ImageData(new Uint8ClampedArray(imageData), width, height);
-  ctx.putImageData(data, 0, 0);
-
-  // Преобразуем Canvas в Data URL
-  dataURL = canvas.toDataURL('image/png');
-
+          // Преобразуем Canvas в Data URL
+          dataURL = canvas.toDataURL('image/png');
         }
       };
 
@@ -233,18 +230,7 @@
         return;
       }
 
-     /* const canvas = document.createElement('canvas');
-      canvas.width = session.renderState.baseLayer.viewport.width;
-      canvas.height = session.renderState.baseLayer.viewport.height;
-      const ctx = canvas.getContext('2d');
-      if (imageData) {
-        const imageDataObject = new ImageData(new Uint8ClampedArray(imageData), canvas.width, canvas.height);
-        ctx.putImageData(imageDataObject, 0, 0);
-        const thumbnailImg = document.getElementById('thumbnailImg');
-        thumbnailImg.src = canvas.toDataURL();
-        document.getElementById('thumbnail').style.display = 'block';
-      }
-*/
+      // Вывод информации
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
         rotationVector.x * radToDeg,
@@ -254,17 +240,20 @@
 
       document.getElementById('info').innerText = 
         `Distance Z: ${zDistance}\n` +
-        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`+
-('${dataURL}');
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)` +
+        `\n${dataURL ? 'Image URL is available' : 'No image available'}`;
 
+      if (dataURL) {
         // Создаем ссылку для скачивания
-  const link = document.createElement('a');
-  link.href = dataURL;
-  link.download = 'image.png'; // Имя файла для скачивания
-  document.body.appendChild(link);
-  link.click(); // Инициируем скачивание
-  document.body.removeChild(link); // Удаляем ссылку из документа
-      
+        const link = document.createElement('a');
+        link.href = dataURL;
+        link.download = 'image.png'; // Имя файла для скачивания
+        document.body.appendChild(link);
+        link.click(); // Инициируем скачивание
+        document.body.removeChild(link); // Удаляем ссылку из документа
+      } else {
+        alert('Image data is not available');
+      }
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
