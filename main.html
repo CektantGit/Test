@@ -161,7 +161,7 @@
 
           // Capture the camera image data
 // Capture the camera image data
-if (session.updateRenderState) {
+
   const layer = session.renderState.baseLayer;
   const gl = layer.context;
   const width = layer.viewport.width;
@@ -183,7 +183,7 @@ if (session.updateRenderState) {
 
   // Преобразуем Canvas в Data URL
   dataURL = canvas.toDataURL('image/png');
-}
+
         }
       };
 
