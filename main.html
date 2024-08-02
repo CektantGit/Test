@@ -75,6 +75,7 @@
     let flowerPlaced = false;
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
+    var cameraStream;
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
@@ -145,6 +146,8 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
+
+          cameraStream = session.renderState.baseLayer.getVideoFrame();
 
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
@@ -220,7 +223,6 @@
 
       // Capture the camera image
       const cameraImage = document.getElementById('cameraImage');
-      const cameraStream = session.renderState.baseLayer.getVideoFrame();
       if (cameraStream) {
         const imageBitmap = await createImageBitmap(cameraStream);
         cameraImage.src = URL.createObjectURL(imageBitmap);
