@@ -218,7 +218,7 @@
         return;
       }
 
-      const canvas = document.createElement('canvas');
+     /* const canvas = document.createElement('canvas');
       canvas.width = session.renderState.baseLayer.viewport.width;
       canvas.height = session.renderState.baseLayer.viewport.height;
       const ctx = canvas.getContext('2d');
@@ -229,7 +229,7 @@
         thumbnailImg.src = canvas.toDataURL();
         document.getElementById('thumbnail').style.display = 'block';
       }
-
+*/
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
         rotationVector.x * radToDeg,
