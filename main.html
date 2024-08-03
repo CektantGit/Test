@@ -251,6 +251,32 @@ const rotationVectorDegrees = new THREE.Vector3(
 document.getElementById('info').innerText = 
   `Distance Z: ${zDistance}\n` +
   `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+
+      // Создание элемента canvas для рисования изображения
+let canvas = document.createElement('canvas');
+let context = canvas.getContext('2d');
+
+// Устанавливаем размеры canvas в соответствии с размером изображения
+canvas.width = cameraTexture.width;
+canvas.height = cameraTexture.height;
+
+// Рисуем изображение на canvas
+context.drawImage(cameraTexture, 0, 0);
+
+// Получаем данные изображения в формате Blob
+canvas.toBlob(function(blob) {
+    // Создаем ссылку для скачивания
+    let link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'camera_image.png'; // Устанавливаем имя файла
+
+    // Добавляем ссылку на страницу и инициируем скачивание
+    document.body.appendChild(link);
+    link.click();
+
+    // Удаляем ссылку после скачивания
+    document.body.removeChild(link);
+}, 'image/png'); // Указываем формат изображения
       
     }
 
