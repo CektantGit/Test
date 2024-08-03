@@ -1,106 +1,258 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR Камера</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            text-align: center;
-        }
-        canvas {
-            display: none;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR with WebXR</title>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/js/vr/ARButton.js"></script>
+
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+
+    /* Styles for the overlay buttons */
+    .overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    .button {
+      display: block;
+      margin: 5px 0;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .info {
+      position: absolute;
+      top: 10px;
+      left: 150px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    #startARBtn {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
-    <h1>WebXR Камера</h1>
-    <button id="startButton">Запустить WebXR</button>
-    <button id="downloadButton" style="display:none;">Скачать изображение</button>
-    <script>
-        let xrSession = null;
-        let xrReferenceSpace = null;
-        let imageURL = null;
+  <button id="startARBtn">Start AR</button>
+  <div class="overlay" style="display: none;">
+    <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
+    <button class="button" id="showInfoBtn">Show Info</button>
+  </div>
+  <div class="info" id="info">Information will be displayed here.</div>
 
-        async function startWebXR() {
-            try {
-                // Запрашиваем сессию WebXR с разрешением на использование камеры
-                xrSession = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['camera-access']
-                });
+  <script>
+    let flower, reticle, camera, scene, renderer, session;
+    let flowerPlaced = false;
+    var zDistance = 0;
+    var rotationVector = new THREE.Vector3(0, 0, 0);
+    async function activateXR() {
+      // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
+      const canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+      const gl = canvas.getContext('webgl', {xrCompatible: true});
+      
+      // Initialize a WebXR session using "immersive-ar".
+      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
+      session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
-                // Создаем WebGL контекст и привязываем его к сессии WebXR
-                const canvas = document.createElement('canvas');
-                document.body.appendChild(canvas);
-                const gl = canvas.getContext('webgl');
-                const binding = new XRWebGLBinding(xrSession, gl);
+      // Create a reference space for AR.
+      const referenceSpace = await session.requestReferenceSpace('local');
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-                // Запрашиваем пространство отсчета
-                xrReferenceSpace = await xrSession.requestReferenceSpace('local');
+      // Initialize Three.js
+      renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
+      renderer.autoClear = false;
+      camera = new THREE.PerspectiveCamera();
+      camera.matrixAutoUpdate = false;
+      scene = new THREE.Scene();
+      
+      // Add a light source
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
+      directionalLight.position.set(10, 15, 10);
+      scene.add(directionalLight);
 
-                // Запускаем цикл обновления кадров
-                xrSession.requestAnimationFrame(async function onFrame(time, xrFrame) {
-                    const viewerPose = xrFrame.getViewerPose(xrReferenceSpace);
+      // Add a reticle (crosshair) and a flower model
+      const loader = new THREE.GLTFLoader();
+      
+      loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
+        reticle = gltf.scene;
+        reticle.visible = false;
+        scene.add(reticle);
+      });
 
-                    for (const view of viewerPose.views) {
-                        if (view.camera) {
-                            // Получаем текстуру изображения с камеры
-                            const cameraTexture = binding.getCameraImage(view.camera);
+      loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf', (gltf) => {
+        flower = gltf.scene;
+      });
 
-                            // Создаем новый холст для изображения с камеры
-                            canvas.width = view.viewport.width;
-                            canvas.height = view.viewport.height;
-                            const ctx = canvas.getContext('2d');
-                            const imageData = new Uint8Array(canvas.width * canvas.height * 4);
-                            gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
+      // Rendering loop
+      const onXRFrame = (time, frame) => {
+        session.requestAnimationFrame(onXRFrame);
 
-                            // Рисуем данные изображения на холсте
-                            const imageDataObj = new ImageData(new Uint8ClampedArray(imageData), canvas.width, canvas.height);
-                            ctx.putImageData(imageDataObj, 0, 0);
+        // Bind the graphics framebuffer to the baseLayer's framebuffer
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-                            // Сохраняем URL изображения
-                            imageURL = canvas.toDataURL('image/png');
+        // Get the viewer pose and update camera
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const view = pose.views[0];
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
 
-                            // Показываем кнопку для скачивания изображения
-                            document.getElementById('downloadButton').style.display = 'block';
-                        }
-                    }
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+          
+          
 
-                    // Запрашиваем следующий кадр
-                    xrSession.requestAnimationFrame(onFrame);
-                });
-            } catch (error) {
-                console.error('Ошибка при запуске WebXR:', error);
-            }
+          // Update the reticle position based on hit test results
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0 && reticle) {
+            const hitPose = hitTestResults[0].getPose(referenceSpace);
+            reticle.visible = true;
+            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
+            reticle.updateMatrixWorld(true);
+          }
+          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+          if (flowerInScene) {
+            zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
+
+
+            const cameraOrientation = pose.views[0].transform.orientation;
+const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+
+// Вектор, направленный вниз (гравитация)
+const gravityVector = new THREE.Vector3(0, -1, 0);
+
+// Вектор, указывающий вниз относительно текущей ориентации камеры
+const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+
+// Вычисление угла между вектором камеры и гравитацией
+const angle = downVector.angleTo(gravityVector);
+
+// Определение оси вращения для выравнивания камеры с гравитацией
+const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+
+// Создание кватерниона для вращения камеры
+const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+
+// Преобразование кватерниона вращения в углы Эйлера
+const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
+
+// Вектор углов поворота
+ rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+
+          }
+
+          // Render the scene with THREE.WebGLRenderer
+          renderer.render(scene, camera);
         }
+      };
 
-        // Обработчик кнопки для запуска WebXR
-        document.getElementById('startButton').addEventListener('click', () => {
-            if (navigator.xr) {
-                startWebXR();
-            } else {
-                alert('WebXR не поддерживается в вашем браузере.');
-            }
-        });
+      session.requestAnimationFrame(onXRFrame);
 
-        // Обработчик кнопки для скачивания изображения
-        document.getElementById('downloadButton').addEventListener('click', () => {
-            if (imageURL) {
-                const link = document.createElement('a');
-                link.href = imageURL;
-                link.download = 'camera-image.png';
-                link.click();
-            } else {
-                alert('Изображение еще не готово для скачивания.');
-            }
-        });
-    </script>
+      // Hide the start button and show the overlay buttons
+      document.getElementById('startARBtn').style.display = 'none';
+      document.querySelector('.overlay').style.display = 'block';
+
+      // Add event listeners for buttons
+      document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
+      document.getElementById('showInfoBtn').addEventListener('click', showInfo);
+    }
+
+    async function startAR() {
+      if (navigator.xr) {
+        // Start the AR session
+        await activateXR();
+      } else {
+        alert('WebXR not supported');
+      }
+    }
+
+    async function placeFlower() {
+      if (!flower) return;
+
+      if (!flowerPlaced) {
+        // Clone the flower and place it at reticle position
+        const flowerClone = flower.clone();
+        flowerClone.position.copy(reticle.position);
+        flowerClone.name = 'sunflower';
+        scene.add(flowerClone);
+        flowerPlaced = true;
+      } else {
+        // Move the existing flower to the reticle position
+        const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+        if (flowerInScene) {
+          flowerInScene.position.copy(reticle.position);
+        }
+      }
+    }
+
+    function showInfo() {
+      if (!flowerPlaced) {
+        document.getElementById('info').innerText = 'Flower not placed yet.';
+        return;
+      }
+
+      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+      if (!flowerInScene) {
+        document.getElementById('info').innerText = 'Flower not found.';
+        return;
+      }
+      //const pose = frame.getViewerPose(referenceSpace);
+      //const position = xrPose.views[0].transform.position;
+      // Calculate Z distance between the flower and the camera
+      //const distanceZ = flowerInScene.position.y - position.y;
+      
+      // Calculate angle between camera forward vector and gravity direction
+      //const cameraDirection = new THREE.Vector3();
+      //camera.getWorldDirection(cameraDirection);
+      //const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
+      //const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
+      //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
+
+// Коэффициент перевода радианов в градусы
+const radToDeg = 180 / Math.PI;
+
+// Преобразование углов из радиан в градусы
+const rotationVectorDegrees = new THREE.Vector3(
+  rotationVector.x * radToDeg,
+  rotationVector.y * radToDeg,
+  rotationVector.z * radToDeg
+);
+
+// Display information
+document.getElementById('info').innerText = 
+  `Distance Z: ${zDistance}\n` +
+  `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+      
+    }
+
+    // Add event listener for the start button
+    document.getElementById('startARBtn').addEventListener('click', startAR);
+  </script>
 </body>
 </html>
