@@ -240,27 +240,53 @@ function showInfo() {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
 
-    // Attempt to draw the image from the cameraTexture
+    // Set canvas dimensions
+    canvas.width = cameraTexture.width || 640; // default width if cameraTexture is missing dimensions
+    canvas.height = cameraTexture.height || 480; // default height if cameraTexture is missing dimensions
+
     try {
-      // Assuming cameraTexture is a video element or an HTMLMediaElement
-      context.drawImage(cameraTexture, 0, 0, canvas.width, canvas.height);
+      // Try to create a new texture and copy camera image
+      const gl = renderer.getContext();
+      const framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+
+      // Create a new texture to store the camera image
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cameraTexture.width, cameraTexture.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+      // Copy the camera image to the texture
+      const binding = new XRWebGLBinding(session, gl);
+      binding.copyExternalImageToTexture({ source: cameraTexture }, { texture, internalFormat: gl.RGBA, width: cameraTexture.width, height: cameraTexture.height });
+
+      // Read the texture data into an ArrayBuffer
+      const pixels = new Uint8Array(cameraTexture.width * cameraTexture.height * 4);
+      gl.readPixels(0, 0, cameraTexture.width, cameraTexture.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+      // Create an ImageData object from the ArrayBuffer and draw it on the canvas
+      const imageData = new ImageData(new Uint8ClampedArray(pixels), cameraTexture.width, cameraTexture.height);
+      context.putImageData(imageData, 0, 0);
 
       // Get the image data as a Blob and download it
       canvas.toBlob((blob) => {
-        // Create a link for downloading
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'camera_image.png';
+        if (blob) {
+          // Create a link for downloading
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'camera_image.png';
 
-        // Append link to the document and initiate download
-        document.body.appendChild(link);
-        link.click();
+          // Append link to the document and initiate download
+          document.body.appendChild(link);
+          link.click();
 
-        // Remove link after download
-        document.body.removeChild(link);
+          // Remove link after download
+          document.body.removeChild(link);
+        } else {
+          console.error("Failed to create blob from canvas");
+        }
       }, 'image/png');
     } catch (error) {
-      console.error("Error drawing camera image:", error);
+      console.error("Error capturing camera image:", error);
       document.getElementById('info').innerText += '\nError capturing camera image.';
     }
   } else {
