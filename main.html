@@ -228,37 +228,40 @@
 
       const views = session.renderState.baseLayer.getViews();
       if (views.length === 0) {
-        throw new Error('No XR views available.');
+        throw new Error('No views available for capturing camera image.');
       }
 
       const view = views[0];
       const camera = view.camera;
       if (!camera) {
-        throw new Error('No camera available in the XR view.');
+        throw new Error('Camera not available in the view.');
       }
 
-      const width = camera.width;
-      const height = camera.height;
-      
-      const texture = binding.getCameraImage(camera);
-      if (!texture) {
-        throw new Error('Failed to get camera image texture.');
-      }
+      const { width, height } = camera;
+      const renderTarget = new THREE.WebGLRenderTarget(width, height);
 
-      return new Promise((resolve, reject) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
+      // Создаём временный сцену и камеру
+      const tempScene = new THREE.Scene();
+      const tempCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
 
-        const context = canvas.getContext('2d');
-        context.drawImage(texture, 0, 0, width, height);
+      // Рендерим текстуру камеры в renderTarget
+      renderer.setRenderTarget(renderTarget);
+      renderer.render(tempScene, tempCamera);
 
-        canvas.toDataURL('image/png', (dataUrl) => {
-          resolve(dataUrl);
-        }, (error) => {
-          reject(error);
-        });
-      });
+      // Извлекаем данные из renderTarget
+      const data = new Uint8Array(width * height * 4);
+      renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, data);
+
+      // Преобразуем данные в изображение
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      const imageData = context.createImageData(width, height);
+      imageData.data.set(data);
+      context.putImageData(imageData, 0, 0);
+
+      return canvas.toDataURL('image/png');
     }
 
     function downloadImage(dataUrl, filename) {
