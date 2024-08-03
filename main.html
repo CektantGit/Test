@@ -235,34 +235,36 @@ function showInfo() {
     `Distance Z: ${zDistance.toFixed(2)}\n` +
     `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
-  // Create canvas element for drawing the camera image
   if (cameraTexture) {
+    // Create a canvas element for drawing the camera image
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
 
-    // Set canvas dimensions based on the texture dimensions
-    const { width, height } = cameraTexture;
-    canvas.width = width;
-    canvas.height = height;
+    // Attempt to draw the image from the cameraTexture
+    try {
+      // Assuming cameraTexture is a video element or an HTMLMediaElement
+      context.drawImage(cameraTexture, 0, 0, canvas.width, canvas.height);
 
-    // Draw the image on the canvas
-    context.drawImage(cameraTexture, 0, 0, width, height);
+      // Get the image data as a Blob and download it
+      canvas.toBlob((blob) => {
+        // Create a link for downloading
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'camera_image.png';
 
-    // Get the image data as a Blob
-    canvas.toBlob((blob) => {
-      // Create a link for downloading
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'camera_image.png';
+        // Append link to the document and initiate download
+        document.body.appendChild(link);
+        link.click();
 
-      // Append link to the document and initiate download
-      document.body.appendChild(link);
-      link.click();
-
-      // Remove link after download
-      document.body.removeChild(link);
-    }, 'image/png');
+        // Remove link after download
+        document.body.removeChild(link);
+      }, 'image/png');
+    } catch (error) {
+      console.error("Error drawing camera image:", error);
+      document.getElementById('info').innerText += '\nError capturing camera image.';
+    }
   } else {
+    console.log("cameraTexture is null or undefined");
     document.getElementById('info').innerText += '\nCamera image not available.';
   }
 }
