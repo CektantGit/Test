@@ -210,59 +210,62 @@
       }
     }
 
-    function showInfo() {
-      if (!flowerPlaced) {
-        document.getElementById('info').innerText = 'Flower not placed yet.';
-        return;
-      }
+function showInfo() {
+  if (!flowerPlaced) {
+    document.getElementById('info').innerText = 'Flower not placed yet.';
+    return;
+  }
 
-      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-      if (!flowerInScene) {
-        document.getElementById('info').innerText = 'Flower not found.';
-        return;
-      }
+  const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+  if (!flowerInScene) {
+    document.getElementById('info').innerText = 'Flower not found.';
+    return;
+  }
 
-      // Convert rotation from radians to degrees
-      const radToDeg = 180 / Math.PI;
-      const rotationVectorDegrees = new THREE.Vector3(
-        rotationVector.x * radToDeg,
-        rotationVector.y * radToDeg,
-        rotationVector.z * radToDeg
-      );
+  // Convert rotation from radians to degrees
+  const radToDeg = 180 / Math.PI;
+  const rotationVectorDegrees = new THREE.Vector3(
+    rotationVector.x * radToDeg,
+    rotationVector.y * radToDeg,
+    rotationVector.z * radToDeg
+  );
 
-      // Display information
-      document.getElementById('info').innerText = 
-        `Distance Z: ${zDistance.toFixed(2)}\n` +
-        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+  // Display information
+  document.getElementById('info').innerText = 
+    `Distance Z: ${zDistance.toFixed(2)}\n` +
+    `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
-      // Create canvas element for drawing the camera image
-      if (cameraTexture) {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
+  // Create canvas element for drawing the camera image
+  if (cameraTexture) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
 
-        // Set canvas dimensions based on the texture dimensions
-        canvas.width = cameraTexture.width;
-        canvas.height = cameraTexture.height;
+    // Set canvas dimensions based on the texture dimensions
+    const { width, height } = cameraTexture;
+    canvas.width = width;
+    canvas.height = height;
 
-        // Draw the image on the canvas
-        context.drawImage(cameraTexture, 0, 0);
+    // Draw the image on the canvas
+    context.drawImage(cameraTexture, 0, 0, width, height);
 
-        // Get the image data as a Blob
-        canvas.toBlob((blob) => {
-          // Create a link for downloading
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = 'camera_image.png';
+    // Get the image data as a Blob
+    canvas.toBlob((blob) => {
+      // Create a link for downloading
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'camera_image.png';
 
-          // Append link to the document and initiate download
-          document.body.appendChild(link);
-          link.click();
+      // Append link to the document and initiate download
+      document.body.appendChild(link);
+      link.click();
 
-          // Remove link after download
-          document.body.removeChild(link);
-        }, 'image/png');
-      }
-    }
+      // Remove link after download
+      document.body.removeChild(link);
+    }, 'image/png');
+  } else {
+    document.getElementById('info').innerText += '\nCamera image not available.';
+  }
+}
 
     // Add event listener for the start button
     document.getElementById('startARBtn').addEventListener('click', startAR);
