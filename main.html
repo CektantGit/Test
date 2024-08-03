@@ -72,6 +72,7 @@
   <button id="captureImageBtn" style="display: none;">Capture Image</button>
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
+    <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
 
@@ -222,11 +223,16 @@
     }
 
     function captureImage() {
-      const imageUrl = renderer.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.href = imageUrl;
-      link.download = 'capture.png';
-      link.click();
+      try {
+        // Capture the image
+        const imageUrl = renderer.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = imageUrl;
+        link.download = 'capture.png';
+        link.click();
+      } catch (error) {
+        console.error('Error capturing image:', error);
+      }
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
