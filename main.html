@@ -69,6 +69,9 @@
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var cameraTexture = null;
+
+    const gl1 = canvas.getContext("webgl2");
+const binding = new XRWebGLBinding(session, gl1);
       
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
