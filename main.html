@@ -2,18 +2,20 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>WebXR Camera Access</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Raw Camera Access Example</title>
   <style>
     body { margin: 0; }
     canvas { display: block; }
   </style>
 </head>
 <body>
-  <button id="startButton">Start AR</button>
+  <button id="startAR">Start AR</button>
   <canvas id="cameraCanvas"></canvas>
+
   <script>
     const canvas = document.getElementById('cameraCanvas');
-    const context = canvas.getContext('2d');
+    const gl = canvas.getContext('webgl2', { xrCompatible: true });
 
     async function startAR() {
       if (!navigator.xr) {
@@ -21,76 +23,56 @@
         return;
       }
 
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['camera-access']
-      });
+      try {
+        const session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['camera-access']
+        });
 
-      const gl = canvas.getContext('webgl', { xrCompatible: true });
-      const binding = new XRWebGLBinding(session, gl);
-      const baseLayer = new XRWebGLLayer(session, gl);
-      session.updateRenderState({ baseLayer });
+        const binding = new XRWebGLBinding(session, gl);
+        const baseLayer = new XRWebGLLayer(session, gl);
+        session.updateRenderState({ baseLayer });
 
-      const referenceSpace = await session.requestReferenceSpace('local');
-      const hitTestSource = await session.requestHitTestSource({ space: referenceSpace });
+        const referenceSpace = await session.requestReferenceSpace('local');
 
-      session.requestAnimationFrame(onXRFrame);
-
-      async function onXRFrame(time, frame) {
         session.requestAnimationFrame(onXRFrame);
 
-        const pose = frame.getViewerPose(referenceSpace);
-        if (pose) {
-          const view = pose.views[0];
-          const viewport = session.renderState.baseLayer.getViewport(view);
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+        async function onXRFrame(time, frame) {
+          session.requestAnimationFrame(onXRFrame);
 
-          // Get the camera image
-          const cameraImage = await getCameraImage(binding);
-          if (cameraImage) {
-            const image = new Image();
-            image.src = cameraImage;
-            image.onload = () => {
-              context.drawImage(image, 0, 0, canvas.width, canvas.height);
-            };
+          const pose = frame.getViewerPose(referenceSpace);
+          if (pose) {
+            const view = pose.views[0];
+            const viewport = session.renderState.baseLayer.getViewport(view);
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            const cameraImage = await getCameraImage(binding);
+            if (cameraImage) {
+              const img = new Image();
+              img.src = cameraImage;
+              img.onload = () => {
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              };
+            }
           }
         }
+
+        async function getCameraImage(binding) {
+          // This function should use the binding to get the camera image as a data URL or blob
+          // Actual implementation might vary based on available APIs
+          // Placeholder implementation:
+          return new Promise(resolve => {
+            const img = 'data:image/png;base64,...'; // Replace with actual camera image data URL
+            resolve(img);
+          });
+        }
+
+        document.getElementById('startAR').addEventListener('click', startAR);
+      } catch (error) {
+        console.error('Failed to start AR session:', error);
       }
     }
-
-    async function getCameraImage(binding) {
-      const camera = binding.getCamera();
-      if (!camera) {
-        throw new Error('No camera available');
-      }
-
-      const width = camera.width;
-      const height = camera.height;
-
-      const renderTarget = new THREE.WebGLRenderTarget(width, height);
-      const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
-      renderer.setRenderTarget(renderTarget);
-      renderer.clear();
-
-      // Render the camera image into the render target
-      renderer.render(new THREE.Scene(), new THREE.OrthographicCamera());
-
-      // Read pixels from the render target
-      const data = new Uint8Array(width * height * 4);
-      renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, data);
-
-      // Create an image from the pixel data
-      const imageData = new ImageData(new Uint8ClampedArray(data), width, height);
-      const offscreenCanvas = new OffscreenCanvas(width, height);
-      const offscreenContext = offscreenCanvas.getContext('2d');
-      offscreenContext.putImageData(imageData, 0, 0);
-
-      return offscreenCanvas.convertToBlob().then(blob => {
-        return URL.createObjectURL(blob);
-      });
-    }
-
-    document.getElementById('startButton').addEventListener('click', startAR);
   </script>
 </body>
 </html>
