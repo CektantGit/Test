@@ -8,6 +8,12 @@
         body {
             margin: 0;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
         }
         canvas {
             display: none;
@@ -15,58 +21,86 @@
     </style>
 </head>
 <body>
+    <h1>WebXR Камера</h1>
+    <button id="startButton">Запустить WebXR</button>
+    <button id="downloadButton" style="display:none;">Скачать изображение</button>
     <script>
+        let xrSession = null;
+        let xrReferenceSpace = null;
+        let imageURL = null;
+
         async function startWebXR() {
-            // Запрашиваем доступ к WebXR с разрешением на использование камеры
-            const session = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['camera-access']
-            });
+            try {
+                // Запрашиваем сессию WebXR с разрешением на использование камеры
+                xrSession = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['camera-access']
+                });
 
-            // Создаем WebGL контекст и привязываем его к сессии WebXR
-            const canvas = document.createElement('canvas');
-            document.body.appendChild(canvas);
-            const gl = canvas.getContext('webgl');
-            const binding = new XRWebGLBinding(session, gl);
+                // Создаем WebGL контекст и привязываем его к сессии WebXR
+                const canvas = document.createElement('canvas');
+                document.body.appendChild(canvas);
+                const gl = canvas.getContext('webgl');
+                const binding = new XRWebGLBinding(xrSession, gl);
 
-            // Запускаем цикл обновления кадров
-            session.requestAnimationFrame(async function onFrame(time, xrFrame) {
-                const viewerPose = xrFrame.getViewerPose(xrReferenceSpace);
+                // Запрашиваем пространство отсчета
+                xrReferenceSpace = await xrSession.requestReferenceSpace('local');
 
-                for (const view of viewerPose.views) {
-                    if (view.camera) {
-                        // Получаем текстуру изображения с камеры
-                        const cameraTexture = binding.getCameraImage(view.camera);
+                // Запускаем цикл обновления кадров
+                xrSession.requestAnimationFrame(async function onFrame(time, xrFrame) {
+                    const viewerPose = xrFrame.getViewerPose(xrReferenceSpace);
 
-                        // Создаем новый холст для изображения с камеры
-                        canvas.width = view.viewport.width;
-                        canvas.height = view.viewport.height;
-                        const ctx = canvas.getContext('2d');
-                        const imageData = new Uint8Array(canvas.width * canvas.height * 4);
-                        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
+                    for (const view of viewerPose.views) {
+                        if (view.camera) {
+                            // Получаем текстуру изображения с камеры
+                            const cameraTexture = binding.getCameraImage(view.camera);
 
-                        // Рисуем данные изображения на холсте
-                        const imageDataObj = new ImageData(new Uint8ClampedArray(imageData), canvas.width, canvas.height);
-                        ctx.putImageData(imageDataObj, 0, 0);
+                            // Создаем новый холст для изображения с камеры
+                            canvas.width = view.viewport.width;
+                            canvas.height = view.viewport.height;
+                            const ctx = canvas.getContext('2d');
+                            const imageData = new Uint8Array(canvas.width * canvas.height * 4);
+                            gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
 
-                        // Создаем ссылку для скачивания изображения
-                        const link = document.createElement('a');
-                        link.href = canvas.toDataURL('image/png');
-                        link.download = 'camera-image.png';
-                        link.click();
+                            // Рисуем данные изображения на холсте
+                            const imageDataObj = new ImageData(new Uint8ClampedArray(imageData), canvas.width, canvas.height);
+                            ctx.putImageData(imageDataObj, 0, 0);
+
+                            // Сохраняем URL изображения
+                            imageURL = canvas.toDataURL('image/png');
+
+                            // Показываем кнопку для скачивания изображения
+                            document.getElementById('downloadButton').style.display = 'block';
+                        }
                     }
-                }
 
-                // Запрашиваем следующий кадр
-                session.requestAnimationFrame(onFrame);
-            });
+                    // Запрашиваем следующий кадр
+                    xrSession.requestAnimationFrame(onFrame);
+                });
+            } catch (error) {
+                console.error('Ошибка при запуске WebXR:', error);
+            }
         }
 
-        // Проверяем, поддерживает ли браузер WebXR
-        if (navigator.xr) {
-            startWebXR().catch(console.error);
-        } else {
-            alert('WebXR не поддерживается в вашем браузере.');
-        }
+        // Обработчик кнопки для запуска WebXR
+        document.getElementById('startButton').addEventListener('click', () => {
+            if (navigator.xr) {
+                startWebXR();
+            } else {
+                alert('WebXR не поддерживается в вашем браузере.');
+            }
+        });
+
+        // Обработчик кнопки для скачивания изображения
+        document.getElementById('downloadButton').addEventListener('click', () => {
+            if (imageURL) {
+                const link = document.createElement('a');
+                link.href = imageURL;
+                link.download = 'camera-image.png';
+                link.click();
+            } else {
+                alert('Изображение еще не готово для скачивания.');
+            }
+        });
     </script>
 </body>
 </html>
