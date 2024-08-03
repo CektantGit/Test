@@ -120,13 +120,11 @@
         // Get the viewer pose and update camera
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
-          for (const view of pose.views) {
-  if (view.camera) {
-    cameraTexture = binding.getCameraImage(view.camera);
-  }
-          }
+    
+
             
           const view = pose.views[0];
+          cameraTexture = binding.getCameraImage(view.camera);
           const viewport = session.renderState.baseLayer.getViewport(view);
           //cameraTexture = binding.getCameraImage(view.camera);
           renderer.setSize(viewport.width, viewport.height);
