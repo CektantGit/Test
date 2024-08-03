@@ -69,38 +69,31 @@
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var cameraTexture = null;
-      
+
     async function activateXR() {
-      // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl2', {xrCompatible: true});
-      
-      // Initialize a WebXR session using "immersive-ar".
+
       session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body }});
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
-      // Create an XRWebGLBinding instance
       binding = new XRWebGLBinding(session, gl);
-      
-      // Create a reference space for AR.
+
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      // Initialize Three.js
       renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
-      
-      // Add a light source
+
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
 
-      // Add a reticle (crosshair) and a flower model
       const loader = new THREE.GLTFLoader();
       
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
@@ -113,31 +106,25 @@
         flower = gltf.scene;
       });
 
-      // Rendering loop
       const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
 
-        // Bind the graphics framebuffer to the baseLayer's framebuffer
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-        // Get the viewer pose and update camera
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
           const view = pose.views[0];
           const viewport = session.renderState.baseLayer.getViewport(view);
           renderer.setSize(viewport.width, viewport.height);
 
-          // Update camera matrix
           camera.matrix.fromArray(view.transform.matrix);
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
 
-          // Get camera texture
           if (view.camera) {
             cameraTexture = binding.getCameraImage(view.camera);
           }
 
-          // Update the reticle position based on hit test results
           const hitTestResults = frame.getHitTestResults(hitTestSource);
           if (hitTestResults.length > 0 && reticle) {
             const hitPose = hitTestResults[0].getPose(referenceSpace);
@@ -148,10 +135,8 @@
           
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
-            // Calculate distance in the Z-axis
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
-            // Calculate the angle between camera and gravity
             const cameraOrientation = pose.views[0].transform.orientation;
             const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
 
@@ -166,25 +151,21 @@
             rotationVector.set(euler.x, euler.y, euler.z);
           }
 
-          // Render the scene with THREE.WebGLRenderer
           renderer.render(scene, camera);
         }
       };
 
       session.requestAnimationFrame(onXRFrame);
 
-      // Hide the start button and show the overlay buttons
       document.getElementById('startARBtn').style.display = 'none';
       document.querySelector('.overlay').style.display = 'block';
 
-      // Add event listeners for buttons
       document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
       document.getElementById('showInfoBtn').addEventListener('click', showInfo);
     }
 
     async function startAR() {
       if (navigator.xr) {
-        // Start the AR session
         await activateXR();
       } else {
         alert('WebXR not supported');
@@ -195,14 +176,12 @@
       if (!flower) return;
 
       if (!flowerPlaced) {
-        // Clone the flower and place it at reticle position
         const flowerClone = flower.clone();
         flowerClone.position.copy(reticle.position);
         flowerClone.name = 'sunflower';
         scene.add(flowerClone);
         flowerPlaced = true;
       } else {
-        // Move the existing flower to the reticle position
         const flowerInScene = scene.children.find(child => child.name === 'sunflower');
         if (flowerInScene) {
           flowerInScene.position.copy(reticle.position);
@@ -210,94 +189,82 @@
       }
     }
 
-async function showInfo() {
-  if (!flowerPlaced) {
-    document.getElementById('info').innerText = 'Flower not placed yet.';
-    return;
-  }
+    async function showInfo() {
+      if (!flowerPlaced) {
+        document.getElementById('info').innerText = 'Flower not placed yet.';
+        return;
+      }
 
-  const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-  if (!flowerInScene) {
-    document.getElementById('info').innerText = 'Flower not found.';
-    return;
-  }
+      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+      if (!flowerInScene) {
+        document.getElementById('info').innerText = 'Flower not found.';
+        return;
+      }
 
-  // Convert rotation from radians to degrees
-  const radToDeg = 180 / Math.PI;
-  const rotationVectorDegrees = new THREE.Vector3(
-    rotationVector.x * radToDeg,
-    rotationVector.y * radToDeg,
-    rotationVector.z * radToDeg
-  );
+      const radToDeg = 180 / Math.PI;
+      const rotationVectorDegrees = new THREE.Vector3(
+        rotationVector.x * radToDeg,
+        rotationVector.y * radToDeg,
+        rotationVector.z * radToDeg
+      );
 
-  // Display information
-  document.getElementById('info').innerText = 
-    `Distance Z: ${zDistance.toFixed(2)}\n` +
-    `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+      document.getElementById('info').innerText = 
+        `Distance Z: ${zDistance.toFixed(2)}\n` +
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
-  if (cameraTexture) {
-    // Create a canvas element for drawing the camera image
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
+      if (cameraTexture) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
 
-    // Set canvas dimensions based on camera texture dimensions
-    canvas.width = 640; // Use default or appropriate dimensions
-    canvas.height = 480;
+        // Use the dimensions of the texture if available
+        canvas.width = 640;
+        canvas.height = 480;
 
-    try {
-      // Access the WebGL rendering context
-      const gl = renderer.getContext();
-      // Create a framebuffer to capture the image
-      const framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        try {
+          const gl = renderer.getContext();
+          const framebuffer = gl.createFramebuffer();
+          gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
 
-      // Create a texture to store the captured image
-      const texture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+          const texture = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
-      // Copy camera image to the texture
-      const binding = new XRWebGLBinding(session, gl);
-      binding.copyExternalImageToTexture({ source: cameraTexture }, { texture });
+          // Copy camera image to the texture
+          const binding = new XRWebGLBinding(session, gl);
+          binding.copyExternalImageToTexture({ source: cameraTexture }, { texture });
 
-      // Attach the texture to the framebuffer
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
 
-      // Read the pixel data from the framebuffer
-      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
-      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+          gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-      // Create an ImageData object from the pixel data
-      const imageData = new ImageData(new Uint8ClampedArray(pixels), canvas.width, canvas.height);
-      context.putImageData(imageData, 0, 0);
+          const imageData = new ImageData(new Uint8ClampedArray(pixels), canvas.width, canvas.height);
+          context.putImageData(imageData, 0, 0);
 
-      // Convert the canvas image to a Blob and download it
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = 'camera_image.png';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const link = document.createElement('a');
+              link.href = URL.createObjectURL(blob);
+              link.download = 'camera_image.png';
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }
+          }, 'image/png');
+        } catch (error) {
+          console.error("Error capturing camera image:", error);
+          document.getElementById('info').innerText += '\nError capturing camera image.';
+        } finally {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.deleteFramebuffer(framebuffer);
+          gl.deleteTexture(texture);
         }
-      }, 'image/png');
-    } catch (error) {
-      console.error("Error capturing camera image:", error);
-      document.getElementById('info').innerText += '\nError capturing camera image.';
-    } finally {
-      // Clean up resources
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.deleteFramebuffer(framebuffer);
-      gl.deleteTexture(texture);
+      } else {
+        console.log("cameraTexture is null or undefined");
+        document.getElementById('info').innerText += '\nCamera image not available.';
+      }
     }
-  } else {
-    console.log("cameraTexture is null or undefined");
-    document.getElementById('info').innerText += '\nCamera image not available.';
-  }
-}
 
-    // Add event listener for the start button
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
 </body>
