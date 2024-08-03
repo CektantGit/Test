@@ -33,7 +33,7 @@
     }
     .info {
       position: absolute;
-      top: 20px;
+      top: 10px;
       left: 150px;
       z-index: 10;
       background: rgba(0, 0, 0, 0.5);
@@ -72,7 +72,6 @@
   <button id="saveImageBtn">Save Image</button>
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
-
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
 
@@ -82,12 +81,13 @@
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let videoElement;
+    let arCanvas;
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
-      const canvas = document.createElement('canvas');
-      document.body.appendChild(canvas);
-      const gl = canvas.getContext('webgl', {xrCompatible: true});
+      arCanvas = document.createElement('canvas');
+      document.body.appendChild(arCanvas);
+      const gl = arCanvas.getContext('webgl', {xrCompatible: true});
       
       // Initialize a WebXR session using "immersive-ar".
       session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
@@ -99,7 +99,7 @@
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
       // Initialize Three.js
-      renderer = new THREE.WebGLRenderer({canvas: canvas, context: gl, alpha: true});
+      renderer = new THREE.WebGLRenderer({canvas: arCanvas, context: gl, alpha: true});
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
@@ -143,7 +143,8 @@
         if (pose) {
           const view = pose.views[0];
           const viewport = session.renderState.baseLayer.getViewport(view);
-          renderer.setSize(viewport.width, viewport.height);
+          arCanvas.width = viewport.width;
+          arCanvas.height = viewport.height;
 
           camera.matrix.fromArray(view.transform.matrix);
           camera.projectionMatrix.fromArray(view.projectionMatrix);
@@ -217,7 +218,7 @@
 
     function showInfo() {
       if (!flowerPlaced) {
-        document.getElementById('info').innerText = 'Flower not placed yet.';
+        document.getElementById('info').innerText = 'No flower found.';
         return;
       }
 
@@ -233,14 +234,10 @@
 
     function saveImage() {
       const canvas = document.createElement('canvas');
+      canvas.width = arCanvas.width;
+      canvas.height = arCanvas.height;
       const context = canvas.getContext('2d');
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      canvas.width = width;
-      canvas.height = height;
-
-      // Draw the video frame to the canvas
-      context.drawImage(videoElement, 0, 0, width, height);
+      context.drawImage(arCanvas, 0, 0);
 
       // Convert canvas to a data URL
       const dataURL = canvas.toDataURL('image/png');
