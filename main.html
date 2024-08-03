@@ -64,25 +64,25 @@
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
-    let flower, reticle, camera, scene, renderer, session;
+    let flower, reticle, camera, scene, renderer, session, binding;
     let flowerPlaced = false;
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var cameraTexture = null;
-
-    const gl1 = canvas.getContext("webgl2");
-const binding = new XRWebGLBinding(session, gl1);
       
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      const gl = canvas.getContext('webgl', {xrCompatible: true});
+      const gl = canvas.getContext('webgl2', {xrCompatible: true});
       
       // Initialize a WebXR session using "immersive-ar".
       session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body }});
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
+      // Create an XRWebGLBinding instance
+      binding = new XRWebGLBinding(session, gl);
+      
       // Create a reference space for AR.
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
@@ -123,20 +123,19 @@ const binding = new XRWebGLBinding(session, gl1);
         // Get the viewer pose and update camera
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
-    
-
-            
           const view = pose.views[0];
-          cameraTexture = binding.getCameraImage(view.camera);
           const viewport = session.renderState.baseLayer.getViewport(view);
-          //cameraTexture = binding.getCameraImage(view.camera);
           renderer.setSize(viewport.width, viewport.height);
 
+          // Update camera matrix
           camera.matrix.fromArray(view.transform.matrix);
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
-          
-          
+
+          // Get camera texture
+          if (view.camera) {
+            cameraTexture = binding.getCameraImage(view.camera);
+          }
 
           // Update the reticle position based on hit test results
           const hitTestResults = frame.getHitTestResults(hitTestSource);
@@ -146,35 +145,25 @@ const binding = new XRWebGLBinding(session, gl1);
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
+          
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
+            // Calculate distance in the Z-axis
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
-
+            // Calculate the angle between camera and gravity
             const cameraOrientation = pose.views[0].transform.orientation;
-const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+            const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
 
-// Вектор, направленный вниз (гравитация)
-const gravityVector = new THREE.Vector3(0, -1, 0);
+            const gravityVector = new THREE.Vector3(0, -1, 0);
+            const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
 
-// Вектор, указывающий вниз относительно текущей ориентации камеры
-const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+            const angle = downVector.angleTo(gravityVector);
+            const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+            const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
 
-// Вычисление угла между вектором камеры и гравитацией
-const angle = downVector.angleTo(gravityVector);
-
-// Определение оси вращения для выравнивания камеры с гравитацией
-const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-
-// Создание кватерниона для вращения камеры
-const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-
-// Преобразование кватерниона вращения в углы Эйлера
-const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-
-// Вектор углов поворота
- rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
-
+            rotationVector.set(euler.x, euler.y, euler.z);
           }
 
           // Render the scene with THREE.WebGLRenderer
@@ -232,59 +221,47 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
         document.getElementById('info').innerText = 'Flower not found.';
         return;
       }
-      //const pose = frame.getViewerPose(referenceSpace);
-      //const position = xrPose.views[0].transform.position;
-      // Calculate Z distance between the flower and the camera
-      //const distanceZ = flowerInScene.position.y - position.y;
-      
-      // Calculate angle between camera forward vector and gravity direction
-      //const cameraDirection = new THREE.Vector3();
-      //camera.getWorldDirection(cameraDirection);
-      //const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
-      //const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
-      //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
 
-// Коэффициент перевода радианов в градусы
-const radToDeg = 180 / Math.PI;
+      // Convert rotation from radians to degrees
+      const radToDeg = 180 / Math.PI;
+      const rotationVectorDegrees = new THREE.Vector3(
+        rotationVector.x * radToDeg,
+        rotationVector.y * radToDeg,
+        rotationVector.z * radToDeg
+      );
 
-// Преобразование углов из радиан в градусы
-const rotationVectorDegrees = new THREE.Vector3(
-  rotationVector.x * radToDeg,
-  rotationVector.y * radToDeg,
-  rotationVector.z * radToDeg
-);
+      // Display information
+      document.getElementById('info').innerText = 
+        `Distance Z: ${zDistance.toFixed(2)}\n` +
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
-// Display information
-document.getElementById('info').innerText = 
-  `Distance Z: ${zDistance}\n` +
-  `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+      // Create canvas element for drawing the camera image
+      if (cameraTexture) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
 
-      // Создание элемента canvas для рисования изображения
-let canvas = document.createElement('canvas');
-let context = canvas.getContext('2d');
+        // Set canvas dimensions based on the texture dimensions
+        canvas.width = cameraTexture.width;
+        canvas.height = cameraTexture.height;
 
-// Устанавливаем размеры canvas в соответствии с размером изображения
-canvas.width = cameraTexture.width;
-canvas.height = cameraTexture.height;
+        // Draw the image on the canvas
+        context.drawImage(cameraTexture, 0, 0);
 
-// Рисуем изображение на canvas
-context.drawImage(cameraTexture, 0, 0);
+        // Get the image data as a Blob
+        canvas.toBlob((blob) => {
+          // Create a link for downloading
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'camera_image.png';
 
-// Получаем данные изображения в формате Blob
-canvas.toBlob(function(blob) {
-    // Создаем ссылку для скачивания
-    let link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'camera_image.png'; // Устанавливаем имя файла
+          // Append link to the document and initiate download
+          document.body.appendChild(link);
+          link.click();
 
-    // Добавляем ссылку на страницу и инициируем скачивание
-    document.body.appendChild(link);
-    link.click();
-
-    // Удаляем ссылку после скачивания
-    document.body.removeChild(link);
-}, 'image/png'); // Указываем формат изображения
-      
+          // Remove link after download
+          document.body.removeChild(link);
+        }, 'image/png');
+      }
     }
 
     // Add event listener for the start button
