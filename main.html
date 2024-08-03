@@ -210,7 +210,7 @@
       }
     }
 
-function showInfo() {
+async function showInfo() {
   if (!flowerPlaced) {
     document.getElementById('info').innerText = 'Flower not placed yet.';
     return;
@@ -240,54 +240,56 @@ function showInfo() {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
 
-    // Set canvas dimensions
-    canvas.width = cameraTexture.width || 640; // default width if cameraTexture is missing dimensions
-    canvas.height = cameraTexture.height || 480; // default height if cameraTexture is missing dimensions
+    // Set canvas dimensions based on camera texture dimensions
+    canvas.width = 640; // Use default or appropriate dimensions
+    canvas.height = 480;
 
     try {
-      // Try to create a new texture and copy camera image
+      // Access the WebGL rendering context
       const gl = renderer.getContext();
+      // Create a framebuffer to capture the image
       const framebuffer = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
 
-      // Create a new texture to store the camera image
+      // Create a texture to store the captured image
       const texture = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cameraTexture.width, cameraTexture.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
-      // Copy the camera image to the texture
+      // Copy camera image to the texture
       const binding = new XRWebGLBinding(session, gl);
-      binding.copyExternalImageToTexture({ source: cameraTexture }, { texture, internalFormat: gl.RGBA, width: cameraTexture.width, height: cameraTexture.height });
+      binding.copyExternalImageToTexture({ source: cameraTexture }, { texture });
 
-      // Read the texture data into an ArrayBuffer
-      const pixels = new Uint8Array(cameraTexture.width * cameraTexture.height * 4);
-      gl.readPixels(0, 0, cameraTexture.width, cameraTexture.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      // Attach the texture to the framebuffer
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
 
-      // Create an ImageData object from the ArrayBuffer and draw it on the canvas
-      const imageData = new ImageData(new Uint8ClampedArray(pixels), cameraTexture.width, cameraTexture.height);
+      // Read the pixel data from the framebuffer
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+      // Create an ImageData object from the pixel data
+      const imageData = new ImageData(new Uint8ClampedArray(pixels), canvas.width, canvas.height);
       context.putImageData(imageData, 0, 0);
 
-      // Get the image data as a Blob and download it
+      // Convert the canvas image to a Blob and download it
       canvas.toBlob((blob) => {
         if (blob) {
-          // Create a link for downloading
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
           link.download = 'camera_image.png';
-
-          // Append link to the document and initiate download
           document.body.appendChild(link);
           link.click();
-
-          // Remove link after download
           document.body.removeChild(link);
-        } else {
-          console.error("Failed to create blob from canvas");
         }
       }, 'image/png');
     } catch (error) {
       console.error("Error capturing camera image:", error);
       document.getElementById('info').innerText += '\nError capturing camera image.';
+    } finally {
+      // Clean up resources
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteTexture(texture);
     }
   } else {
     console.log("cameraTexture is null or undefined");
