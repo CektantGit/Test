@@ -75,7 +75,7 @@
       const gl = canvas.getContext('webgl', {xrCompatible: true});
       
       // Initialize a WebXR session using "immersive-ar".
-      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
+      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body }});
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
 
       // Create a reference space for AR.
