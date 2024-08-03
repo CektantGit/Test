@@ -68,6 +68,8 @@
     let flowerPlaced = false;
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
+    var cameraTexture = null;
+      
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
@@ -120,7 +122,7 @@
         if (pose) {
           const view = pose.views[0];
           const viewport = session.renderState.baseLayer.getViewport(view);
-          const cameraTexture = binding.getCameraImage(view.camera);
+          cameraTexture = binding.getCameraImage(view.camera);
           renderer.setSize(viewport.width, viewport.height);
 
           camera.matrix.fromArray(view.transform.matrix);
