@@ -1,78 +1,72 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Raw Camera Access Example</title>
-  <style>
-    body { margin: 0; }
-    canvas { display: block; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebXR Камера</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <button id="startAR">Start AR</button>
-  <canvas id="cameraCanvas"></canvas>
+    <script>
+        async function startWebXR() {
+            // Запрашиваем доступ к WebXR с разрешением на использование камеры
+            const session = await navigator.xr.requestSession('immersive-ar', {
+                requiredFeatures: ['camera-access']
+            });
 
-  <script>
-    const canvas = document.getElementById('cameraCanvas');
-    const gl = canvas.getContext('webgl2', { xrCompatible: true });
+            // Создаем WebGL контекст и привязываем его к сессии WebXR
+            const canvas = document.createElement('canvas');
+            document.body.appendChild(canvas);
+            const gl = canvas.getContext('webgl');
+            const binding = new XRWebGLBinding(session, gl);
 
-    async function startAR() {
-      if (!navigator.xr) {
-        alert('WebXR not supported');
-        return;
-      }
+            // Запускаем цикл обновления кадров
+            session.requestAnimationFrame(async function onFrame(time, xrFrame) {
+                const viewerPose = xrFrame.getViewerPose(xrReferenceSpace);
 
-      try {
-        const session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['camera-access']
-        });
+                for (const view of viewerPose.views) {
+                    if (view.camera) {
+                        // Получаем текстуру изображения с камеры
+                        const cameraTexture = binding.getCameraImage(view.camera);
 
-        const binding = new XRWebGLBinding(session, gl);
-        const baseLayer = new XRWebGLLayer(session, gl);
-        session.updateRenderState({ baseLayer });
+                        // Создаем новый холст для изображения с камеры
+                        canvas.width = view.viewport.width;
+                        canvas.height = view.viewport.height;
+                        const ctx = canvas.getContext('2d');
+                        const imageData = new Uint8Array(canvas.width * canvas.height * 4);
+                        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
 
-        const referenceSpace = await session.requestReferenceSpace('local');
+                        // Рисуем данные изображения на холсте
+                        const imageDataObj = new ImageData(new Uint8ClampedArray(imageData), canvas.width, canvas.height);
+                        ctx.putImageData(imageDataObj, 0, 0);
 
-        session.requestAnimationFrame(onXRFrame);
+                        // Создаем ссылку для скачивания изображения
+                        const link = document.createElement('a');
+                        link.href = canvas.toDataURL('image/png');
+                        link.download = 'camera-image.png';
+                        link.click();
+                    }
+                }
 
-        async function onXRFrame(time, frame) {
-          session.requestAnimationFrame(onXRFrame);
-
-          const pose = frame.getViewerPose(referenceSpace);
-          if (pose) {
-            const view = pose.views[0];
-            const viewport = session.renderState.baseLayer.getViewport(view);
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-
-            const cameraImage = await getCameraImage(binding);
-            if (cameraImage) {
-              const img = new Image();
-              img.src = cameraImage;
-              img.onload = () => {
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              };
-            }
-          }
+                // Запрашиваем следующий кадр
+                session.requestAnimationFrame(onFrame);
+            });
         }
 
-        async function getCameraImage(binding) {
-          // This function should use the binding to get the camera image as a data URL or blob
-          // Actual implementation might vary based on available APIs
-          // Placeholder implementation:
-          return new Promise(resolve => {
-            const img = 'data:image/png;base64,...'; // Replace with actual camera image data URL
-            resolve(img);
-          });
+        // Проверяем, поддерживает ли браузер WebXR
+        if (navigator.xr) {
+            startWebXR().catch(console.error);
+        } else {
+            alert('WebXR не поддерживается в вашем браузере.');
         }
-
-        document.getElementById('startAR').addEventListener('click', startAR);
-      } catch (error) {
-        console.error('Failed to start AR session:', error);
-      }
-    }
-  </script>
+    </script>
 </body>
 </html>
