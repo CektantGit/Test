@@ -206,6 +206,54 @@
       document.getElementById('info').innerText = 
         `Distance Z: ${zDistance.toFixed(2)}\n` +
         `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+
+      // Получение изображения с камеры
+      const cameraImage = await getCameraImage();
+      if (cameraImage) {
+        downloadImage(cameraImage, 'camera_image.png');
+      }
+    }
+
+    function getCameraImage() {
+      return new Promise((resolve, reject) => {
+        if (!session || !binding) {
+          reject('WebXR session or binding is not initialized.');
+          return;
+        }
+
+        const view = session.renderState.baseLayer.getViews()[0];
+        const camera = view.camera;
+
+        if (!camera) {
+          reject('No camera available.');
+          return;
+        }
+
+        const texture = binding.getCameraImage(camera);
+        if (!texture) {
+          reject('Failed to get camera image.');
+          return;
+        }
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = texture.width;
+        canvas.height = texture.height;
+
+        const imageData = context.createImageData(texture.width, texture.height);
+        context.putImageData(imageData, 0, 0);
+
+        texture.toDataURL().then(dataUrl => {
+          resolve(dataUrl);
+        }).catch(reject);
+      });
+    }
+
+    function downloadImage(dataUrl, filename) {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      a.click();
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
