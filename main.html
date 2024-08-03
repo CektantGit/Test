@@ -74,9 +74,12 @@
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl2', {xrCompatible: true});
 
-      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body }});
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
+        domOverlay: { root: document.body }
+      });
       session.updateRenderState({baseLayer: new XRWebGLLayer(session, gl)});
-
+      
       binding = new XRWebGLBinding(session, gl);
 
       const referenceSpace = await session.requestReferenceSpace('local');
@@ -208,44 +211,53 @@
         `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
       // Получение изображения с камеры
-      const cameraImage = await getCameraImage();
-      if (cameraImage) {
-        downloadImage(cameraImage, 'camera_image.png');
+      try {
+        const cameraImage = await getCameraImage();
+        if (cameraImage) {
+          downloadImage(cameraImage, 'camera_image.png');
+        }
+      } catch (error) {
+        console.error('Error getting camera image:', error);
       }
     }
 
-    function getCameraImage() {
+    async function getCameraImage() {
+      if (!session || !binding) {
+        throw new Error('WebXR session or binding is not initialized.');
+      }
+
+      const views = session.renderState.baseLayer.getViews();
+      if (views.length === 0) {
+        throw new Error('No XR views available.');
+      }
+
+      const view = views[0];
+      const camera = view.camera;
+      if (!camera) {
+        throw new Error('No camera available in the XR view.');
+      }
+
+      const width = camera.width;
+      const height = camera.height;
+      
+      const texture = binding.getCameraImage(camera);
+      if (!texture) {
+        throw new Error('Failed to get camera image texture.');
+      }
+
       return new Promise((resolve, reject) => {
-        if (!session || !binding) {
-          reject('WebXR session or binding is not initialized.');
-          return;
-        }
-
-        const view = session.renderState.baseLayer.getViews()[0];
-        const camera = view.camera;
-
-        if (!camera) {
-          reject('No camera available.');
-          return;
-        }
-
-        const texture = binding.getCameraImage(camera);
-        if (!texture) {
-          reject('Failed to get camera image.');
-          return;
-        }
-
         const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
         const context = canvas.getContext('2d');
-        canvas.width = texture.width;
-        canvas.height = texture.height;
+        context.drawImage(texture, 0, 0, width, height);
 
-        const imageData = context.createImageData(texture.width, texture.height);
-        context.putImageData(imageData, 0, 0);
-
-        texture.toDataURL().then(dataUrl => {
+        canvas.toDataURL('image/png', (dataUrl) => {
           resolve(dataUrl);
-        }).catch(reject);
+        }, (error) => {
+          reject(error);
+        });
       });
     }
 
