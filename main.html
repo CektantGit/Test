@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR with WebXR</title>
+  <title>AR with WebXR and Save Image</title>
 
   <!-- Three.js -->
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
@@ -53,10 +53,23 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    #saveImageBtn {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <button id="startARBtn">Start AR</button>
+  <button id="saveImageBtn">Save Image</button>
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
     <button class="button" id="showInfoBtn">Show Info</button>
@@ -66,8 +79,10 @@
   <script>
     let flower, reticle, camera, scene, renderer, session;
     let flowerPlaced = false;
-    var zDistance = 0;
-    var rotationVector = new THREE.Vector3(0, 0, 0);
+    let zDistance = 0;
+    let rotationVector = new THREE.Vector3(0, 0, 0);
+    let videoElement;
+
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
@@ -108,7 +123,15 @@
         flower = gltf.scene;
       });
 
-      // Rendering loop
+      // Add video element for camera feed
+      videoElement = document.createElement('video');
+      videoElement.style.display = 'none';
+      document.body.appendChild(videoElement);
+
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      videoElement.srcObject = stream;
+      videoElement.play();
+
       const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
 
@@ -126,8 +149,6 @@
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
           
-          
-
           // Update the reticle position based on hit test results
           const hitTestResults = frame.getHitTestResults(hitTestSource);
           if (hitTestResults.length > 0 && reticle) {
@@ -140,31 +161,16 @@
           if (flowerInScene) {
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
-
             const cameraOrientation = pose.views[0].transform.orientation;
-const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+            const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
 
-// Вектор, направленный вниз (гравитация)
-const gravityVector = new THREE.Vector3(0, -1, 0);
-
-// Вектор, указывающий вниз относительно текущей ориентации камеры
-const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
-
-// Вычисление угла между вектором камеры и гравитацией
-const angle = downVector.angleTo(gravityVector);
-
-// Определение оси вращения для выравнивания камеры с гравитацией
-const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-
-// Создание кватерниона для вращения камеры
-const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-
-// Преобразование кватерниона вращения в углы Эйлера
-const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-
-// Вектор углов поворота
- rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
-
+            const gravityVector = new THREE.Vector3(0, -1, 0);
+            const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+            const angle = downVector.angleTo(gravityVector);
+            const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+            const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
+            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
           }
 
           // Render the scene with THREE.WebGLRenderer
@@ -181,11 +187,11 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
       // Add event listeners for buttons
       document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
       document.getElementById('showInfoBtn').addEventListener('click', showInfo);
+      document.getElementById('saveImageBtn').addEventListener('click', saveImage);
     }
 
     async function startAR() {
       if (navigator.xr) {
-        // Start the AR session
         await activateXR();
       } else {
         alert('WebXR not supported');
@@ -196,14 +202,12 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
       if (!flower) return;
 
       if (!flowerPlaced) {
-        // Clone the flower and place it at reticle position
         const flowerClone = flower.clone();
         flowerClone.position.copy(reticle.position);
         flowerClone.name = 'sunflower';
         scene.add(flowerClone);
         flowerPlaced = true;
       } else {
-        // Move the existing flower to the reticle position
         const flowerInScene = scene.children.find(child => child.name === 'sunflower');
         if (flowerInScene) {
           flowerInScene.position.copy(reticle.position);
@@ -219,39 +223,35 @@ const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
 
       const flowerInScene = scene.children.find(child => child.name === 'sunflower');
       if (!flowerInScene) {
-        document.getElementById('info').innerText = 'Flower not found.';
+        document.getElementById('info').innerText = 'No flower found.';
         return;
       }
-      //const pose = frame.getViewerPose(referenceSpace);
-      //const position = xrPose.views[0].transform.position;
-      // Calculate Z distance between the flower and the camera
-      //const distanceZ = flowerInScene.position.y - position.y;
-      
-      // Calculate angle between camera forward vector and gravity direction
-      //const cameraDirection = new THREE.Vector3();
-      //camera.getWorldDirection(cameraDirection);
-      //const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
-      //const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
-      //const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
 
-// Коэффициент перевода радианов в градусы
-const radToDeg = 180 / Math.PI;
-
-// Преобразование углов из радиан в градусы
-const rotationVectorDegrees = new THREE.Vector3(
-  rotationVector.x * radToDeg,
-  rotationVector.y * radToDeg,
-  rotationVector.z * radToDeg
-);
-
-// Display information
-document.getElementById('info').innerText = 
-  `Distance Z: ${zDistance}\n` +
-  `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-      
+      const distance = flowerInScene.position.distanceTo(camera.position);
+      document.getElementById('info').innerText = `Flower distance from camera: ${distance.toFixed(2)} meters.`;
     }
 
-    // Add event listener for the start button
+    function saveImage() {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+
+      // Draw the video frame to the canvas
+      context.drawImage(videoElement, 0, 0, width, height);
+
+      // Convert canvas to a data URL
+      const dataURL = canvas.toDataURL('image/png');
+
+      // Create a link element and trigger download
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = 'snapshot.png';
+      link.click();
+    }
+
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
 </body>
