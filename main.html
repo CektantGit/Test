@@ -65,9 +65,9 @@
   <script>
     let flower, reticle, camera, scene, renderer, session, binding;
     let flowerPlaced = false;
-    let zDistance = 0;
-    let rotationVector = new THREE.Vector3(0, 0, 0);
-
+    var zDistance = 0;
+    var rotationVector = new THREE.Vector3(0, 0, 0);
+    var cameraTexture = null;
     async function activateXR() {
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
@@ -127,6 +127,10 @@
             reticle.visible = true;
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
+          }
+
+          if (view.camera) {
+            cameraTexture = binding.getCameraImage(view.camera);
           }
 
           renderer.render(scene, camera);
@@ -193,18 +197,6 @@
     }
 
     async function downloadImage() {
-      if (!binding) {
-        console.error('XRWebGLBinding is not initialized.');
-        return;
-      }
-
-      const frame = await session.requestAnimationFrame();
-      const pose = frame.getViewerPose(await session.requestReferenceSpace('local'));
-      const view = pose.views[0];
-
-      if (view.camera) {
-        const cameraTexture = binding.getCameraImage(view.camera);
-
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         const width = cameraTexture.width;
@@ -219,8 +211,6 @@
         link.href = canvas.toDataURL('image/png');
         link.download = 'camera_image.png';
         link.click();
-      } else {
-        console.error('No camera image available.');
       }
     }
 
