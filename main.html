@@ -277,29 +277,37 @@
       captureImage();
     }
 
-    function captureImage() {
-      const gl = renderer.getContext();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      const viewport = renderer.getSize(new THREE.Vector2());
-      const pixels = new Uint8Array(viewport.width * viewport.height * 4);
-      gl.readPixels(0, 0, viewport.width, viewport.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+function captureImage() {
+  const gl = renderer.getContext();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer); // Используем фреймбуфер AR сцены
 
-      // Create an image data URL from the pixel data
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const context = canvas.getContext('2d');
-      const imageData = context.createImageData(viewport.width, viewport.height);
-      imageData.data.set(pixels);
-      context.putImageData(imageData, 0, 0);
+  const viewport = renderer.getSize(new THREE.Vector2());
+  const pixels = new Uint8Array(viewport.width * viewport.height * 4);
 
-      // Create a download link
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
-      link.download = 'ar_image.png';
-      link.click();
-	captureNext = false;
-    }
+  // Чтение пикселей
+  gl.readPixels(0, 0, viewport.width, viewport.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+  // Создание изображения
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const context = canvas.getContext('2d');
+  const imageData = context.createImageData(viewport.width, viewport.height);
+  imageData.data.set(pixels);
+  context.putImageData(imageData, 0, 0);
+
+  // Отладочная информация: отображаем изображение в div
+  const imgElement = document.createElement('img');
+  imgElement.src = canvas.toDataURL('image/png');
+  document.body.appendChild(imgElement);
+
+  // Создание ссылки для скачивания изображения
+  const link = document.createElement('a');
+  link.href = canvas.toDataURL('image/png');
+  link.download = 'ar_image.png';
+  link.click();
+  captureNext = false;
+}
 
     // Add event listener for the start button
     document.getElementById('startARBtn').addEventListener('click', startAR);
