@@ -64,7 +64,7 @@
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
-    let flower, reticle, camera, scene, renderer, session;
+    let flower, reticle, camera, scene, renderer, session, glBinding, dcamera;
     let flowerPlaced = false;
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
@@ -75,6 +75,12 @@
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', { xrCompatible: true });
+
+      gl.makeXRCompatible().then(x=>{
+			// could lead to race condition
+			initCameraCaptureScene(gl)
+			glBinding = new XRWebGLBinding(session, gl);
+		})
       
       // Initialize a WebXR session using "immersive-ar".
       session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body } });
@@ -134,6 +140,10 @@
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
           const view = pose.views[0];
+          
+          dcamera = view.camera;
+				  camBinding = glBinding.getCameraImage(dcamera);
+          
           const viewport = session.renderState.baseLayer.getViewport(view);
           renderer.setSize(viewport.width, viewport.height);
 
