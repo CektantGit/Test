@@ -69,6 +69,7 @@
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var framebuffer, texture;
+    var captureNext = false;
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
@@ -140,9 +141,13 @@
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
           const view = pose.views[0];
-          
+
+
+	  if !(captureNext) {
+	  captureNext = true;
           dcamera = view.camera;
 	  camBinding = glBinding.getCameraImage(dcamera);
+	  }
           
           const viewport = session.renderState.baseLayer.getViewport(view);
           renderer.setSize(viewport.width, viewport.height);
@@ -293,6 +298,7 @@
       link.href = canvas.toDataURL('image/png');
       link.download = 'ar_image.png';
       link.click();
+	captureNext = false;
     }
 
     // Add event listener for the start button
