@@ -70,12 +70,13 @@
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var framebuffer, texture;
     let captureNext = false;
+    let gl = canvas.getContext('webgl', { xrCompatible: true });
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      const gl = canvas.getContext('webgl', { xrCompatible: true });
+      gl = canvas.getContext('webgl', { xrCompatible: true });
 
 
       
@@ -278,8 +279,7 @@
     }
 
 function captureImage() {
-  const gl = renderer.getContext();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer); // Используем фреймбуфер AR сцены
+
 
   const viewport = renderer.getSize(new THREE.Vector2());
   const pixels = new Uint8Array(viewport.width * viewport.height * 4);
