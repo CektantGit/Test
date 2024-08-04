@@ -64,12 +64,12 @@
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
-    let flower, reticle, camera, scene, renderer, session, glBinding, dcamera,camBinding;
+    let flower, reticle, camera, scene, renderer, session, glBinding, dcamera, camBinding;
     let flowerPlaced = false;
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var framebuffer, texture;
-    var captureNext = false;
+    let captureNext = false;
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
@@ -85,7 +85,7 @@
       session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access' ], domOverlay: { root: document.body } });
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
-	glBinding = new XRWebGLBinding(session, gl);
+      glBinding = new XRWebGLBinding(session, gl);
 
       // Create a reference space for AR.
       const referenceSpace = await session.requestReferenceSpace('local');
