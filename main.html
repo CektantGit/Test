@@ -143,47 +143,54 @@
           const view = pose.views[0];
 
 
-	  if (!captureNext) {
-	  captureNext = true;
-          dcamera = view.camera;
-		  // Предположим, что dcamera и glBinding уже определены и инициализированы
-camBinding = glBinding.getCameraImage(dcamera);
+if (!captureNext) {
+  captureNext = true;
+  dcamera = view.camera;
+  // Предполагаем, что dcamera и glBinding уже определены и инициализированы
 
-		   document.getElementById('info').innerText = `GetImage` ;
+  const texture = glBinding.getCameraImage(dcamera);
+  const width = dcamera.width; // Ширина изображения
+  const height = dcamera.height; // Высота изображения
 
-let width = dcamera.width; // Ширина изображения
-let height = dcamera.height; // Высота изображения
+  // Создаем массив для хранения данных пикселей
+  const texture_bytes = width * height * 4; // RGBA
+  let readback_pixels = new Uint8Array(texture_bytes);
 
-// Создание <canvas> элемента
-let canvas = document.createElement('canvas');
-canvas.width = width;
-canvas.height = height;
+  // Очищаем массив
+  readback_pixels.fill(0);
 
-let context = canvas.getContext('2d');
-document.getElementById('info').innerText = `get context` ;
-// Создание ImageData и установка данных пикселей
-let imageData = new ImageData(new Uint8ClampedArray(camBinding), width, height);
-		   document.getElementById('info').innerText = `Image Data` ;
+  // Захват пикселей из текстуры
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, readback_framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
 
-context.putImageData(imageData, 0, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, readback_pixels);
 
-		  document.getElementById('info').innerText = `Put Image` ;
+    // Создаем <canvas> элемент и устанавливаем его размеры
+    let canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    let context = canvas.getContext('2d');
 
-// Получение данных изображения в формате PNG
-canvas.toDataURL('image/png', (dataUrl) => {
-    // dataUrl содержит изображение в формате PNG в виде base64 строки
-    // Вы можете использовать его для загрузки изображения или сохранения на диск
-});
+    // Создаем ImageData и устанавливаем данные пикселей
+    let imageData = new ImageData(new Uint8ClampedArray(readback_pixels), width, height);
+    context.putImageData(imageData, 0, 0);
 
-		        document.getElementById('info').innerText = `To data UrlCreate` ;
-
-		  
-// Пример сохранения данных PNG в виде файла (только в некоторых браузерах)
-let link = document.createElement('a');
-link.href = canvas.toDataURL('image/png');
-link.download = 'camera_image.png';
-link.click();
-	  }
+    // Получаем данные изображения в формате PNG
+    canvas.toBlob((blob) => {
+      // Создаем ссылку на загруженный файл
+      const url = URL.createObjectURL(blob);
+      // Создаем элемент для скачивания файла
+      let link = document.createElement('a');
+      link.href = url;
+      link.download = 'camera_image.png';
+      link.click();
+      // Освобождаем URL-объект
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }
+}
           
           const viewport = session.renderState.baseLayer.getViewport(view);
           renderer.setSize(viewport.width, viewport.height);
