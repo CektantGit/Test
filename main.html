@@ -146,9 +146,8 @@
 	  if (!captureNext) {
 	  captureNext = true;
           dcamera = view.camera;
-	  camBinding = glBinding.getCameraImage(dcamera);
 		  // Предположим, что dcamera и glBinding уже определены и инициализированы
-let image = glBinding.getCameraImage(dcamera);
+camBinding = glBinding.getCameraImage(dcamera);
 let width = dcamera.width; // Ширина изображения
 let height = dcamera.height; // Высота изображения
 
@@ -160,7 +159,7 @@ canvas.height = height;
 let context = canvas.getContext('2d');
 
 // Создание ImageData и установка данных пикселей
-let imageData = new ImageData(new Uint8ClampedArray(image), width, height);
+let imageData = new ImageData(new Uint8ClampedArray(camBinding), width, height);
 context.putImageData(imageData, 0, 0);
 
 // Получение данных изображения в формате PNG
