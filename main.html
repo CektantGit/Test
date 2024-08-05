@@ -144,7 +144,7 @@
 
 
 	  if (!captureNext) {
-	  captureNext = false;
+	  captureNext = true;
           dcamera = view.camera;
 	  camBinding = glBinding.getCameraImage(dcamera);
 		  // Предположим, что dcamera и glBinding уже определены и инициализированы
@@ -326,7 +326,7 @@ link.click();
       link.href = canvas.toDataURL('image/png');
       link.download = 'ar_image.png';
       link.click();*/
-	captureNext = true;
+	captureNext = false;
     }
 
     // Add event listener for the start button
