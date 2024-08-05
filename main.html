@@ -148,6 +148,9 @@
           dcamera = view.camera;
 		  // Предположим, что dcamera и glBinding уже определены и инициализированы
 camBinding = glBinding.getCameraImage(dcamera);
+
+		   document.getElementById('info').innerText = `GetImage` ;
+
 let width = dcamera.width; // Ширина изображения
 let height = dcamera.height; // Высота изображения
 
@@ -161,6 +164,8 @@ let context = canvas.getContext('2d');
 // Создание ImageData и установка данных пикселей
 let imageData = new ImageData(new Uint8ClampedArray(camBinding), width, height);
 context.putImageData(imageData, 0, 0);
+
+		  document.getElementById('info').innerText = `Put Image` ;
 
 // Получение данных изображения в формате PNG
 canvas.toDataURL('image/png', (dataUrl) => {
