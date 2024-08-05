@@ -166,9 +166,11 @@ context.putImageData(imageData, 0, 0);
 canvas.toDataURL('image/png', (dataUrl) => {
     // dataUrl содержит изображение в формате PNG в виде base64 строки
     // Вы можете использовать его для загрузки изображения или сохранения на диск
-    console.log(dataUrl);
 });
 
+		        document.getElementById('info').innerText = `To data UrlCreate` ;
+
+		  
 // Пример сохранения данных PNG в виде файла (только в некоторых браузерах)
 let link = document.createElement('a');
 link.href = canvas.toDataURL('image/png');
@@ -295,11 +297,11 @@ link.click();
         rotationVector.y * radToDeg,
         rotationVector.z * radToDeg
       );
-
+/*
       document.getElementById('info').innerText = 
         `Distance Z: ${zDistance}\n` +
         `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
+*/
       // Capture the image from the AR scene
       captureImage();
     }
