@@ -69,7 +69,7 @@
     var zDistance = 0;
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var framebuffer, texture;
-    let captureNext = false;
+    let captureNext = true;
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
@@ -144,9 +144,37 @@
 
 
 	  if (!captureNext) {
-	  captureNext = true;
+	  captureNext = false;
           dcamera = view.camera;
 	  camBinding = glBinding.getCameraImage(dcamera);
+		  // Предположим, что dcamera и glBinding уже определены и инициализированы
+let image = glBinding.getCameraImage(dcamera);
+let width = dcamera.width; // Ширина изображения
+let height = dcamera.height; // Высота изображения
+
+// Создание <canvas> элемента
+let canvas = document.createElement('canvas');
+canvas.width = width;
+canvas.height = height;
+
+let context = canvas.getContext('2d');
+
+// Создание ImageData и установка данных пикселей
+let imageData = new ImageData(new Uint8ClampedArray(image), width, height);
+context.putImageData(imageData, 0, 0);
+
+// Получение данных изображения в формате PNG
+canvas.toDataURL('image/png', (dataUrl) => {
+    // dataUrl содержит изображение в формате PNG в виде base64 строки
+    // Вы можете использовать его для загрузки изображения или сохранения на диск
+    console.log(dataUrl);
+});
+
+// Пример сохранения данных PNG в виде файла (только в некоторых браузерах)
+let link = document.createElement('a');
+link.href = canvas.toDataURL('image/png');
+link.download = 'camera_image.png';
+link.click();
 	  }
           
           const viewport = session.renderState.baseLayer.getViewport(view);
@@ -278,7 +306,7 @@
     }
 
     function captureImage() {
-      const gl = renderer.getContext();
+     /* const gl = renderer.getContext();
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       const viewport = renderer.getSize(new THREE.Vector2());
       const pixels = new Uint8Array(viewport.width * viewport.height * 4);
@@ -297,8 +325,8 @@
       const link = document.createElement('a');
       link.href = canvas.toDataURL('image/png');
       link.download = 'ar_image.png';
-      link.click();
-	captureNext = false;
+      link.click();*/
+	captureNext = true;
     }
 
     // Add event listener for the start button
