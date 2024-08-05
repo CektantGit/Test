@@ -146,52 +146,65 @@
 if (!captureNext) {
   captureNext = true;
   dcamera = view.camera;
-  // Предполагаем, что dcamera и glBinding уже определены и инициализированы
 
+  // Предполагаем, что dcamera и glBinding уже определены и инициализированы
   const texture = glBinding.getCameraImage(dcamera);
   const width = dcamera.width; // Ширина изображения
   const height = dcamera.height; // Высота изображения
 
-  // Создаем массив для хранения данных пикселей
-  const texture_bytes = width * height * 4; // RGBA
-  let readback_pixels = new Uint8Array(texture_bytes);
-
-  // Очищаем массив
-  readback_pixels.fill(0);
-
-  // Захват пикселей из текстуры
+  // Настройка framebuffer
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, readback_framebuffer);
+  const framebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
 
   if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, readback_pixels);
+    // Создаем PBO для асинхронного чтения пикселей
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, width * height * 4, gl.STREAM_READ);
 
-    // Создаем <canvas> элемент и устанавливаем его размеры
-    let canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    let context = canvas.getContext('2d');
+    // Читаем пиксели из WebGL
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    readPixelsAsync(gl, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(width * height * 4), buffer)
+      .then(() => {
+        gl.deleteBuffer(buffer);
+        
+        // Создаем <canvas> элемент и устанавливаем его размеры
+        let canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        let context = canvas.getContext('2d');
 
-    // Создаем ImageData и устанавливаем данные пикселей
-	        document.getElementById('info').innerText = 'Before ImageData';
-    let imageData = new ImageData(new Uint8ClampedArray(readback_pixels), width, height);
-    context.putImageData(imageData, 0, 0);
+        // Создаем ImageData и устанавливаем данные пикселей
+        let imageData = new ImageData(new Uint8ClampedArray(new Uint8Array(width * height * 4)), width, height);
+        context.putImageData(imageData, 0, 0);
 
-    // Получаем данные изображения в формате PNG
-    canvas.toBlob((blob) => {
-      // Создаем ссылку на загруженный файл
-      const url = URL.createObjectURL(blob);
-      // Создаем элемент для скачивания файла
-      let link = document.createElement('a');
-      link.href = url;
-      link.download = 'camera_image.png';
-      link.click();
-      // Освобождаем URL-объект
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+        // Получаем данные изображения в формате PNG
+        canvas.toBlob((blob) => {
+          // Создаем ссылку на загруженный файл
+          const url = URL.createObjectURL(blob);
+          // Создаем элемент для скачивания файла
+          let link = document.createElement('a');
+          link.href = url;
+          link.download = 'camera_image.png';
+          link.click();
+          // Освобождаем URL-объект
+          URL.revokeObjectURL(url);
+        }, 'image/png');
+
+        // Очистка
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.deleteFramebuffer(framebuffer);
+      })
+      .catch((error) => {
+        console.error('Error reading pixels:', error);
+      });
+  } else {
+    console.error('Framebuffer is not complete.');
   }
 }
+
           
           const viewport = session.renderState.baseLayer.getViewport(view);
           renderer.setSize(viewport.width, viewport.height);
