@@ -6,9 +6,9 @@
   <title>AR with WebXR</title>
 
   <!-- Three.js -->
-  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
-  <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
-  <script src="https://unpkg.com/three@0.126.0/examples/js/vr/ARButton.js"></script>
+  <script src="https://unpkg.com/three@0.165.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.165.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://unpkg.com/three@0.165.0/examples/js/vr/ARButton.js"></script>
 
   <style>
     body { margin: 0; overflow: hidden; }
@@ -70,13 +70,12 @@
     var rotationVector = new THREE.Vector3(0, 0, 0);
     var framebuffer, texture;
     let captureNext = false;
-    let gl = canvas.getContext('webgl', { xrCompatible: true });
 
     async function activateXR() {
       // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true });
+      const gl = canvas.getContext('webgl', { xrCompatible: true });
 
 
       
@@ -278,36 +277,29 @@
       captureImage();
     }
 
-function captureImage() {
+    function captureImage() {
+      const gl = renderer.getContext();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      const viewport = renderer.getSize(new THREE.Vector2());
+      const pixels = new Uint8Array(viewport.width * viewport.height * 4);
+      gl.readPixels(0, 0, viewport.width, viewport.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
+      // Create an image data URL from the pixel data
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext('2d');
+      const imageData = context.createImageData(viewport.width, viewport.height);
+      imageData.data.set(pixels);
+      context.putImageData(imageData, 0, 0);
 
-  const viewport = renderer.getSize(new THREE.Vector2());
-  const pixels = new Uint8Array(viewport.width * viewport.height * 4);
-
-  // Чтение пикселей
-  gl.readPixels(0, 0, viewport.width, viewport.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-
-  // Создание изображения
-  const canvas = document.createElement('canvas');
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  const context = canvas.getContext('2d');
-  const imageData = context.createImageData(viewport.width, viewport.height);
-  imageData.data.set(pixels);
-  context.putImageData(imageData, 0, 0);
-
-  // Отладочная информация: отображаем изображение в div
-  const imgElement = document.createElement('img');
-  imgElement.src = canvas.toDataURL('image/png');
-  document.body.appendChild(imgElement);
-
-  // Создание ссылки для скачивания изображения
-  const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/png');
-  link.download = 'ar_image.png';
-  link.click();
-  captureNext = false;
-}
+      // Create a download link
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = 'ar_image.png';
+      link.click();
+	captureNext = false;
+    }
 
     // Add event listener for the start button
     document.getElementById('startARBtn').addEventListener('click', startAR);
