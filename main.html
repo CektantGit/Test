@@ -160,9 +160,11 @@ canvas.width = width;
 canvas.height = height;
 
 let context = canvas.getContext('2d');
-
+document.getElementById('info').innerText = `get context` ;
 // Создание ImageData и установка данных пикселей
 let imageData = new ImageData(new Uint8ClampedArray(camBinding), width, height);
+		   document.getElementById('info').innerText = `Image Data` ;
+
 context.putImageData(imageData, 0, 0);
 
 		  document.getElementById('info').innerText = `Put Image` ;
