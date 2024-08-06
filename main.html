@@ -378,18 +378,6 @@ if (!captureNext) {
         return;
       }
 
-      // Calculate Z distance between the flower and the camera
-      // const pose = frame.getViewerPose(referenceSpace);
-      // const position = xrPose.views[0].transform.position;
-      // const distanceZ = flowerInScene.position.y - position.y;
-      
-      // Calculate angle between camera forward vector and gravity direction
-      // const cameraDirection = new THREE.Vector3();
-      // camera.getWorldDirection(cameraDirection);
-      // const gravity = new THREE.Vector3(0, 0, -1); // Assuming gravity points in -Z direction
-      // const angle = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(0, -1, 0)).normalize();
-      // const angle = cameraDirection.angleTo(gravity) * (180 / Math.PI); // Convert radians to degrees
-
       // Convert rotation angles from radians to degrees
       const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
@@ -407,26 +395,6 @@ if (!captureNext) {
     }
 
     function captureImage() {
-     /* const gl = renderer.getContext();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      const viewport = renderer.getSize(new THREE.Vector2());
-      const pixels = new Uint8Array(viewport.width * viewport.height * 4);
-      gl.readPixels(0, 0, viewport.width, viewport.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-
-      // Create an image data URL from the pixel data
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const context = canvas.getContext('2d');
-      const imageData = context.createImageData(viewport.width, viewport.height);
-      imageData.data.set(pixels);
-      context.putImageData(imageData, 0, 0);
-
-      // Create a download link
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
-      link.download = 'ar_image.png';
-      link.click();*/
 	captureNext = false;
     }
 
