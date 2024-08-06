@@ -135,7 +135,7 @@
 
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
-            zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
+           /* zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
             const cameraOrientation = pose.views[0].transform.orientation;
             const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
@@ -147,7 +147,7 @@
             const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
             const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
             const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);*/
           }
 
           renderer.render(scene, camera);
