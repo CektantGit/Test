@@ -32,7 +32,7 @@
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let captureNext = false;
     let captureCount = 0;
-    const maxCaptures = 10;
+    const maxCaptures = 11;
     const captures = [];
 
     async function activateXR() {
@@ -134,10 +134,6 @@
               captureNext = false;
               captureCount++;
 
-              // Проверяем, достигли ли лимита захватов
-              if (captureCount >= maxCaptures) {
-                generateArchive();
-              }
             }
           }
 
@@ -184,8 +180,11 @@
         document.getElementById('info').innerText = 'Flower not placed yet.';
         return;
       }
-
+      if (captureCount >= maxCaptures) {
+                generateArchive();
+      } else {
       captureNext = true;
+      }
     }
 
     async function captureImage(gl, glBinding, dcamera, captureIndex) {
