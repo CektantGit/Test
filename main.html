@@ -14,7 +14,6 @@
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
 
-    /* Styles for the overlay buttons */
     .overlay {
       position: absolute;
       bottom: 10px;
@@ -64,47 +63,36 @@
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
-    let flower, reticle, camera, scene, renderer, session, glBinding, dcamera, camBinding;
+    let flower, reticle, camera, scene, renderer, session, glBinding;
     let flowerPlaced = false;
-    var zDistance = 0;
-    var rotationVector = new THREE.Vector3(0, 0, 0);
-    var framebuffer, texture;
-    let captureNext = true;
+    let zDistance = 0;
+    let rotationVector = new THREE.Vector3(0, 0, 0);
+    let captureNext = false;
 
     async function activateXR() {
-      // Create a canvas element and initialize a WebGL context that is compatible with WebXR.
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', { xrCompatible: true });
 
-
-      
-
-      
-      // Initialize a WebXR session using "immersive-ar".
-      session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access' ], domOverlay: { root: document.body } });
+      session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body } });
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
       glBinding = new XRWebGLBinding(session, gl);
 
-      // Create a reference space for AR.
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      // Initialize Three.js
       renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
 
-      // Add a light source
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
 
-      // Add a reticle (crosshair) and a flower model
       const loader = new THREE.GLTFLoader();
       loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
         reticle = gltf.scene;
@@ -116,51 +104,138 @@
         flower = gltf.scene;
       });
 
-      // Create a framebuffer to read pixels from
-      framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-
-      // Create a texture to store the pixels
-      texture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-
-      // Attach the texture to the framebuffer
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-
-      // Rendering loop
       const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
 
-        // Bind the graphics framebuffer to the baseLayer's framebuffer
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-        // Get the viewer pose and update camera
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
           const view = pose.views[0];
+          if (captureNext && view.camera) {
+            captureNext = false;
+            dcamera = view.camera;
+            captureImage(gl, glBinding, dcamera);
+          }
+
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
+
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0 && reticle) {
+            const hitPose = hitTestResults[0].getPose(referenceSpace);
+            reticle.visible = true;
+            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
+            reticle.updateMatrixWorld(true);
+          }
+
+          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+          if (flowerInScene) {
+            zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
+
+            const cameraOrientation = pose.views[0].transform.orientation;
+            const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+
+            const gravityVector = new THREE.Vector3(0, -1, 0);
+            const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+
+            const angle = downVector.angleTo(gravityVector);
+            const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+            const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
+            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+          }
+
+          renderer.render(scene, camera);
+        }
+      };
+
+      session.requestAnimationFrame(onXRFrame);
+
+      document.getElementById('startARBtn').style.display = 'none';
+      document.querySelector('.overlay').style.display = 'block';
+
+      document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
+      document.getElementById('showInfoBtn').addEventListener('click', showInfo);
+    }
+
+    async function startAR() {
+      if (navigator.xr) {
+        await activateXR();
+      } else {
+        alert('WebXR not supported');
+      }
+    }
+
+    async function placeFlower() {
+      if (!flower) return;
+
+      if (!flowerPlaced) {
+        const flowerClone = flower.clone();
+        flowerClone.position.copy(reticle.position);
+        flowerClone.name = 'sunflower';
+        scene.add(flowerClone);
+        flowerPlaced = true;
+      } else {
+        const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+        if (flowerInScene) {
+          flowerInScene.position.copy(reticle.position);
+        }
+      }
+    }
+
+    function showInfo() {
+      if (!flowerPlaced) {
+        document.getElementById('info').innerText = 'Flower not placed yet.';
+        return;
+      }
+
+      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+      if (!flowerInScene) {
+        document.getElementById('info').innerText = 'Flower not found.';
+        return;
+      }
+
+      const radToDeg = 180 / Math.PI;
+      const rotationVectorDegrees = new THREE.Vector3(
+        rotationVector.x * radToDeg,
+        rotationVector.y * radToDeg,
+        rotationVector.z * radToDeg
+      );
+
+      document.getElementById('info').innerText = 
+        `Distance Z: ${zDistance}\n` +
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+
+      captureNext = true;
+    }
 
 
-if (!captureNext) {
-  captureNext = true;
-  dcamera = view.camera;
 
+async function captureImage(gl, glBinding, dcamera) {
   // Получаем текстуру камеры
   const texture = glBinding.getCameraImage(dcamera);
   const width = dcamera.width;
   const height = dcamera.height;
 
+  if (!texture) {
+    console.error('Не удалось получить текстуру с камеры');
+    return;
+  }
+
   // Масштабируем изображение, если необходимо
   const scale = 1; // Коэффициент масштаба, 1 - без масштабирования
   const scaledWidth = Math.floor(width * scale);
   const scaledHeight = Math.floor(height * scale);
-  const texture_bytes = scaledWidth * scaledHeight * 4; // Количество байт для RGBA
+  const textureBytes = scaledWidth * scaledHeight * 4; // Количество байт для RGBA
 
   // Создаем массив для хранения данных пикселей
-  let readback_pixels = new Uint8Array(texture_bytes);
-  readback_pixels.fill(0);
+  let readbackPixels = new Uint8Array(textureBytes);
+  readbackPixels.fill(0);
 
   // Создаем текстуру для копирования и фреймбуфер
   let copyTexture = gl.createTexture();
@@ -173,8 +248,8 @@ if (!captureNext) {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
 
   if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    console.warn("Framebuffer incomplete!");
-    return false;
+    console.error("Framebuffer incomplete!");
+    return;
   }
 
   // Устанавливаем шейдеры
@@ -201,7 +276,7 @@ if (!captureNext) {
   if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
     console.error('An error occurred compiling the vertex shader: ' + gl.getShaderInfoLog(vertexShader));
     gl.deleteShader(vertexShader);
-    return false;
+    return;
   }
 
   const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
@@ -210,7 +285,7 @@ if (!captureNext) {
   if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
     console.error('An error occurred compiling the fragment shader: ' + gl.getShaderInfoLog(fragmentShader));
     gl.deleteShader(fragmentShader);
-    return false;
+    return;
   }
 
   const program = gl.createProgram();
@@ -219,7 +294,7 @@ if (!captureNext) {
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
-    return false;
+    return;
   }
 
   gl.useProgram(program);
@@ -245,7 +320,7 @@ if (!captureNext) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   // Чтение пикселей
-  gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readback_pixels);
+  gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
   // Освобождаем ресурсы WebGL
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -263,7 +338,7 @@ if (!captureNext) {
   let context = canvas.getContext('2d');
 
   // Создаем ImageData и устанавливаем данные пикселей
-  let imageData = new ImageData(new Uint8ClampedArray(readback_pixels), scaledWidth, scaledHeight);
+  let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
   context.putImageData(imageData, 0, 0);
 
   // Получаем данные изображения в формате PNG и инициируем скачивание
@@ -277,128 +352,7 @@ if (!captureNext) {
   }, 'image/png');
 }
 
-          
-          const viewport = session.renderState.baseLayer.getViewport(view);
-          renderer.setSize(viewport.width, viewport.height);
 
-          camera.matrix.fromArray(view.transform.matrix);
-          camera.projectionMatrix.fromArray(view.projectionMatrix);
-          camera.updateMatrixWorld(true);
-
-          // Update the reticle position based on hit test results
-          const hitTestResults = frame.getHitTestResults(hitTestSource);
-          if (hitTestResults.length > 0 && reticle) {
-            const hitPose = hitTestResults[0].getPose(referenceSpace);
-            reticle.visible = true;
-            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
-            reticle.updateMatrixWorld(true);
-          }
-          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-          if (flowerInScene) {
-            zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
-
-            const cameraOrientation = pose.views[0].transform.orientation;
-            const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
-
-            // Vector pointing down (gravity)
-            const gravityVector = new THREE.Vector3(0, -1, 0);
-
-            // Vector pointing down relative to the current camera orientation
-            const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
-
-            // Compute the angle between the camera vector and gravity
-            const angle = downVector.angleTo(gravityVector);
-
-            // Compute the axis of rotation to align the camera with gravity
-            const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-
-            // Create a quaternion for rotating the camera
-            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-
-            // Convert the rotation quaternion to Euler angles
-            const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-
-            // Rotation vector in Euler angles
-            rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
-          }
-
-          // Render the scene with THREE.WebGLRenderer
-          renderer.render(scene, camera);
-        }
-      };
-
-      session.requestAnimationFrame(onXRFrame);
-
-      // Hide the start button and show the overlay buttons
-      document.getElementById('startARBtn').style.display = 'none';
-      document.querySelector('.overlay').style.display = 'block';
-
-      // Add event listeners for buttons
-      document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
-      document.getElementById('showInfoBtn').addEventListener('click', showInfo);
-    }
-
-    async function startAR() {
-      if (navigator.xr) {
-        // Start the AR session
-        await activateXR();
-      } else {
-        alert('WebXR not supported');
-      }
-    }
-
-    async function placeFlower() {
-      if (!flower) return;
-
-      if (!flowerPlaced) {
-        // Clone the flower and place it at reticle position
-        const flowerClone = flower.clone();
-        flowerClone.position.copy(reticle.position);
-        flowerClone.name = 'sunflower';
-        scene.add(flowerClone);
-        flowerPlaced = true;
-      } else {
-        // Move the existing flower to the reticle position
-        const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-        if (flowerInScene) {
-          flowerInScene.position.copy(reticle.position);
-        }
-      }
-    }
-
-    function showInfo() {
-      if (!flowerPlaced) {
-        document.getElementById('info').innerText = 'Flower not placed yet.';
-        return;
-      }
-
-      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-      if (!flowerInScene) {
-        document.getElementById('info').innerText = 'Flower not found.';
-        return;
-      }
-
-      // Convert rotation angles from radians to degrees
-      const radToDeg = 180 / Math.PI;
-      const rotationVectorDegrees = new THREE.Vector3(
-        rotationVector.x * radToDeg,
-        rotationVector.y * radToDeg,
-        rotationVector.z * radToDeg
-      );
-
-      document.getElementById('info').innerText = 
-        `Distance Z: ${zDistance}\n` +
-        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
-      // Capture the image from the AR scene
-      captureImage();
-    }
-
-    function captureImage() {
-	captureNext = false;
-    }
-
-    // Add event listener for the start button
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
 </body>
