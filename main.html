@@ -147,6 +147,17 @@
             const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
             const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
             rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+
+                            const radToDeg = 180 / Math.PI;
+      const rotationVectorDegrees = new THREE.Vector3(
+        rotationVector.x * radToDeg,
+        rotationVector.y * radToDeg,
+        rotationVector.z * radToDeg
+      );
+
+      document.getElementById('info').innerText = 
+        `Distance Z: ${zDistance}\n` +
+        `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
                       
             captureNext = false;
             dcamera = view.camera;
@@ -207,7 +218,7 @@
         return;
       }
 
-      const radToDeg = 180 / Math.PI;
+      /*const radToDeg = 180 / Math.PI;
       const rotationVectorDegrees = new THREE.Vector3(
         rotationVector.x * radToDeg,
         rotationVector.y * radToDeg,
@@ -217,7 +228,7 @@
       document.getElementById('info').innerText = 
         `Distance Z: ${zDistance}\n` +
         `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
+*/
       
     }
 
