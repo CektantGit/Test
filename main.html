@@ -308,25 +308,38 @@
       }, 'image/png');
     }
 
-    function generateArchive() {
-      const zip = new JSZip();
+// Функция сброса состояния после создания архива
+  function resetState() {
+    captureCount = 0;
+    captures.length = 0;
+    captureNext = false;
 
-      captures.forEach((capture, index) => {
-        zip.file(`image_${index + 1}.png`, capture.imageBlob);
-        const info = `Distance Z: ${capture.zDistance.toFixed(2)}\n` +
-                     `Rotation Vector (Degrees): (${capture.rotationVectorDegrees.x.toFixed(2)}, ${capture.rotationVectorDegrees.y.toFixed(2)}, ${capture.rotationVectorDegrees.z.toFixed(2)})\n`;
-        zip.file(`info_${index + 1}.txt`, info);
-      });
+    // Очищаем информацию на экране
+    document.getElementById('info').innerText = 'Начинаем новый сбор данных.';
+  }
 
-      zip.generateAsync({ type: 'blob' }).then((blob) => {
-        const url = URL.createObjectURL(blob);
-        let link = document.createElement('a');
-        link.href = url;
-        link.download = 'captures.zip';
-        link.click();
-        URL.revokeObjectURL(url);
-      });
-    }
+  function generateArchive() {
+    const zip = new JSZip();
+
+    captures.forEach((capture, index) => {
+      zip.file(`image_${index + 1}.png`, capture.imageBlob);
+      const info = `Distance Z: ${capture.zDistance.toFixed(2)}\n` +
+                   `Rotation Vector (Degrees): (${capture.rotationVectorDegrees.x.toFixed(2)}, ${capture.rotationVectorDegrees.y.toFixed(2)}, ${capture.rotationVectorDegrees.z.toFixed(2)})\n`;
+      zip.file(`info_${index + 1}.txt`, info);
+    });
+
+    zip.generateAsync({ type: 'blob' }).then((blob) => {
+      const url = URL.createObjectURL(blob);
+      let link = document.createElement('a');
+      link.href = url;
+      link.download = 'captures.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+      
+      // После скачивания архива обнуляем состояние
+      resetState();
+    });
+  }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
