@@ -127,13 +127,13 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           }
+          
+                                const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+          if (flowerInScene) {
 
                     if (captureNext && view.camera) {
-            captureNext = false;
-            dcamera = view.camera;
-            captureImage(gl, glBinding, dcamera);
-                      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-          if (flowerInScene) {
+
+
             zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
 
             const cameraOrientation = pose.views[0].transform.orientation;
@@ -147,6 +147,10 @@
             const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
             const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
             rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+                      
+            captureNext = false;
+            dcamera = view.camera;
+            captureImage(gl, glBinding, dcamera);
           }
           }
 
@@ -189,6 +193,9 @@
     }
 
     function showInfo() {
+
+      captureNext = true;
+      
       if (!flowerPlaced) {
         document.getElementById('info').innerText = 'Flower not placed yet.';
         return;
@@ -211,7 +218,7 @@
         `Distance Z: ${zDistance}\n` +
         `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
-      captureNext = true;
+      
     }
 
 
