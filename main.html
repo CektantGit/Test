@@ -208,14 +208,14 @@
 
     async function processImageWithModel(imageData) {
       const inputTensor = tf.browser.fromPixels(imageData).expandDims(0).toFloat().div(255);
-
+      document.getElementById('info').innerText = "asddddddd";
       if (model) {
         const prediction = model.predict(inputTensor);
         const predArray = await prediction.array();
-                              document.getElementById('info').innerText = "YEEE";
+        document.getElementById('info').innerText = "YEEE";
         displayPrediction(predArray);
       } else {
-                      document.getElementById('info').innerText =   "Dis";
+        document.getElementById('info').innerText =   "Dis";
         console.error("Модель не загружена");
       }
     }
@@ -236,6 +236,7 @@
       imgElement.src = canvas.toDataURL();
       imgElement.style.display = 'block';
     }
+    document.getElementById('info').innerText = "TAP";
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
     document.getElementById('captureButton').addEventListener('click', () => {
