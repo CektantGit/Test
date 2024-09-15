@@ -132,10 +132,10 @@
                 rotationVector.z * radToDeg
               );
 
-              document.getElementById('info').innerText =
+          /*    document.getElementById('info').innerText =
                 `Distance Z: ${zDistance.toFixed(2)}\n` +
                 `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
+*/
               captureNext = false;  // Останавливаем захват после кадра
               captureImage(frame, view.camera);
             }
@@ -212,12 +212,10 @@
       if (model) {
         const prediction = model.predict(inputTensor);
         const predArray = await prediction.array();
-                              document.getElementById('info').innerText =
-                `YEEE:';
+                              document.getElementById('info').innerText = `YEEE:';
         displayPrediction(predArray);
       } else {
-                      document.getElementById('info').innerText =
-                `Distance Z:';
+                      document.getElementById('info').innerText =   `Distance Z:';
         console.error("Модель не загружена");
       }
     }
