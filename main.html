@@ -128,8 +128,8 @@ async function processFrame(gl, viewCamera) {
 
   // Наложение результата на исходное изображение
   const resultCanvas = document.createElement('canvas');
-  resultCanvas.width = width;
-  resultCanvas.height = height;
+  resultCanvas.width = width/4;
+  resultCanvas.height = height/4;
   const resultCtx = resultCanvas.getContext('2d');
 
   // Сначала рисуем исходное изображение на результат
