@@ -207,7 +207,7 @@
       const batchedImgTensor = resizedImgTensor.expandDims(0); // Добавление размерности батча
 
       try {
-        const predictions = await model.predict(batchedImgTensor).array();
+        const predictions = await model.predict(batchedImgTensor);
         console.log("Model predictions:", predictions);
        // document.getElementById('info').innerText += "\nModel predictions: " + JSON.stringify(predictions);
          document.getElementById('info').innerText  += "Start convert predict"
