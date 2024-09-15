@@ -199,12 +199,13 @@
       ctx.putImageData(imageData, 0, 0);
 
       // Преобразование изображения в формат, подходящий для нейросети
-      const imgTensor = tf.browser.fromPixels(canvas).toFloat();
-      const normalizedImgTensor = imgTensor.div(tf.scalar(255)); // Нормализация значений пикселей
+      const imgTensor = tf.browser.fromPixels(canvas, 1);
+      const normalizedImgTensor =  imgTensor.div(255.0);
 
       // Преобразование изображения в нужный формат для модели
       const resizedImgTensor = tf.image.resizeBilinear(normalizedImgTensor, [224, 224]); // Изменение размера
-      const batchedImgTensor = resizedImgTensor.expandDims(0); // Добавление размерности батча
+      const batchedImgTensor = resizedImgTensor.expandDims();
+      
 
       try {
         const predictions = await model.predict(batchedImgTensor);
