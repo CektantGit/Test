@@ -152,7 +152,7 @@ async function processFrame(gl, viewCamera) {
         const view = pose.views[0];
 
         // Обработка кадра
-       // await processFrame(gl, view.camera);
+        await processFrame(gl, view.camera);
 
         renderer.render(scene, camera);
       }
