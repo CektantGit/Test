@@ -189,127 +189,61 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
 
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        console.error("Framebuffer incomplete!");
-        document.getElementById('info').innerText += "\nFramebuffer incomplete!";
-        return;
-      }
-
-      const vertexShaderSource = `
-        attribute vec4 aVertexPosition;
-        varying vec2 vTexCoord;
-        void main(void) {
-          gl_Position = aVertexPosition;
-          vTexCoord = (aVertexPosition.xy + 1.0) * 0.5;
-        }
-      `;
-      const fragmentShaderSource = `
-        precision mediump float;
-        varying vec2 vTexCoord;
-        uniform sampler2D uSampler;
-        void main(void) {
-          gl_FragColor = texture2D(uSampler, vTexCoord);
-        }
-      `;
-
-      const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-      gl.shaderSource(vertexShader, vertexShaderSource);
-      gl.compileShader(vertexShader);
-
-      const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-      gl.shaderSource(fragmentShader, fragmentShaderSource);
-      gl.compileShader(fragmentShader);
-
-      const shaderProgram = gl.createProgram();
-      gl.attachShader(shaderProgram, vertexShader);
-      gl.attachShader(shaderProgram, fragmentShader);
-      gl.linkProgram(shaderProgram);
-      gl.useProgram(shaderProgram);
-
-      const positionAttribute = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
-      const texCoordAttribute = gl.getAttribLocation(shaderProgram, 'aTexCoord');
-      const samplerUniform = gl.getUniformLocation(shaderProgram, 'uSampler');
-
-      const vertices = new Float32Array([
-        -1, -1, 0, 0,
-         1, -1, 1, 0,
-        -1,  1, 0, 1,
-         1,  1, 1, 1
-      ]);
-
-      const vertexBuffer = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-      gl.vertexAttribPointer(positionAttribute, 2, gl.FLOAT, false, 16, 0);
-      gl.enableVertexAttribArray(positionAttribute);
-
-      gl.vertexAttribPointer(texCoordAttribute, 2, gl.FLOAT, false, 16, 8);
-      gl.enableVertexAttribArray(texCoordAttribute);
-
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(samplerUniform, 0);
-
-      gl.viewport(0, 0, scaledWidth, scaledHeight);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
       gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
-      // Преобразование полученного изображения в формат, подходящий для модели
-      const image = new ImageData(new Uint8ClampedArray(readbackPixels.buffer), scaledWidth, scaledHeight);
+      const imageData = new ImageData(new Uint8ClampedArray(readbackPixels.buffer), scaledWidth, scaledHeight);
       const canvas = document.createElement('canvas');
-      canvas.width = 224;
-      canvas.height = 224;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(canvas, 0, 0, 224, 224);
+      canvas.width = scaledWidth;
+      canvas.height = scaledHeight;
+      ctx.putImageData(imageData, 0, 0);
 
-      const imageData = ctx.getImageData(0, 0, 224, 224);
-      const inputTensor = tf.browser.fromPixels(imageData).toFloat().expandDims(0);
-      
+      // Преобразование изображения в формат, подходящий для нейросети
+      const imgTensor = tf.browser.fromPixels(canvas).toFloat();
+      const normalizedImgTensor = imgTensor.div(tf.scalar(255)); // Нормализация значений пикселей
+
+      // Преобразование изображения в нужный формат для модели
+      const resizedImgTensor = tf.image.resizeBilinear(normalizedImgTensor, [224, 224]); // Изменение размера
+      const batchedImgTensor = resizedImgTensor.expandDims(0); // Добавление размерности батча
+
       try {
-        const predictions = await model.predict(inputTensor);
-        const unetMask = predictions;
-        const unetMaskArray = unetMask.dataSync();
+        const predictions = await model.predict(batchedImgTensor).array();
+        console.log("Model predictions:", predictions);
+        document.getElementById('info').innerText += "\nModel predictions: " + JSON.stringify(predictions);
 
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = 224;
-        resultCanvas.height = 224;
-        const resultCtx = resultCanvas.getContext('2d');
-        const resultImageData = resultCtx.createImageData(224, 224);
+        // Обработка и отображение предсказаний
+        const unetMask = predictions;
+        const unetMaskArray = new Float32Array(unetMask);
+
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = 224;
+        maskCanvas.height = 224;
+        const maskCtx = maskCanvas.getContext('2d');
+        const maskImageData = maskCtx.createImageData(224, 224);
 
         for (let i = 0; i < 224 * 224; i++) {
           const value = unetMaskArray[i] * 255;
-          resultImageData.data[i * 4] = value;
-          resultImageData.data[i * 4 + 1] = value;
-          resultImageData.data[i * 4 + 2] = value;
-          resultImageData.data[i * 4 + 3] = 255;
+          maskImageData.data[i * 4] = value; // R
+          maskImageData.data[i * 4 + 1] = value; // G
+          maskImageData.data[i * 4 + 2] = value; // B
+          maskImageData.data[i * 4 + 3] = 255; // A
         }
 
-        resultCtx.putImageData(resultImageData, 0, 0);
+        maskCtx.putImageData(maskImageData, 0, 0);
 
-        // Сохранение предсказанного изображения
-        const dataURL = resultCanvas.toDataURL('image/png');
-        const link = document.createElement('a');
-        link.href = dataURL;
-        link.download = 'prediction.png';
-        link.click();
-
-        // Отображение предсказанного изображения на странице
-        document.getElementById('info').innerText += "\nPrediction image saved and displayed.";
-        document.body.appendChild(resultCanvas);
+        // Вывод предсказанного изображения на страницу
+        const resultImage = document.createElement('img');
+        resultImage.src = maskCanvas.toDataURL();
+        document.body.appendChild(resultImage);
 
       } catch (error) {
-        console.error("Error during model prediction:", error);
+        console.error('Error during model prediction:', error);
         document.getElementById('info').innerText += "\nError during model prediction: " + error.message;
       }
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
-    document.getElementById('captureButton').addEventListener('click', () => {
-      captureNext = true;
-    });
+    document.getElementById('captureButton').addEventListener('click', () => captureNext = true);
   </script>
 </body>
 </html>
