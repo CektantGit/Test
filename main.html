@@ -39,7 +39,7 @@
 
     async function loadModel() {
       // Загрузка модели TensorFlow.js
-      model = await tf.loadGraphModel('jsModel/model.json');
+      model = await tf.loadLayersModel('jsModel/model.json');
       console.log("Модель загружена");
     }
 
