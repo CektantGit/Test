@@ -17,7 +17,7 @@
     .info { position: absolute; bottom: 10px; right: 150px; z-index: 10; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
     #captureButton { position: absolute; top: 50px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
-    #predictionImage { position: absolute; top: 10px; left: 150px; z-index: 10; }
+    #predictedImage { position: absolute; bottom: 10px; right: 10px; z-index: 10; }
   </style>
 </head>
 <body>
@@ -28,7 +28,7 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
-  <img id="predictionImage" style="display: none;" />
+  <img id="predictedImage" style="display: none;"/>
 
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
@@ -36,11 +36,16 @@
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let captureNext = false;
+    const captures = [];
     let model;
 
     async function loadModel() {
-      model = await tf.loadLayersModel('jsModel/model.json');
-      console.log("Модель загружена");
+      try {
+        model = await tf.loadLayersModel('jsModel/model.json');
+        document.getElementById('info').innerText = "Модель загружена";
+      } catch (error) {
+        document.getElementById('info').innerText = `Ошибка загрузки модели: ${error.message}`;
+      }
     }
 
     async function activateXR() {
@@ -134,7 +139,7 @@
                 `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
 
               captureNext = false;  // Останавливаем захват после кадра
-              captureImage(gl, glBinding, view.camera);
+              await captureImage(gl, glBinding, view.camera);
             }
           }
 
@@ -156,7 +161,7 @@
         await loadModel();  // Загрузка модели перед началом XR-сессии
         await activateXR();
       } else {
-        alert('WebXR not supported');
+        document.getElementById('info').innerText = 'WebXR not supported';
       }
     }
 
@@ -178,50 +183,37 @@
     }
 
     function showInfo() {
-      const infoElement = document.getElementById('info');
-      if (infoElement.style.display === 'none') {
-        infoElement.style.display = 'block';
+      if (!flowerPlaced) {
+        document.getElementById('info').innerText = 'Flower not placed';
       } else {
-        infoElement.style.display = 'none';
+        document.getElementById('info').innerText = `Flower position: (${flower.position.x.toFixed(2)}, ${flower.position.y.toFixed(2)}, ${flower.position.z.toFixed(2)})`;
       }
     }
 
     async function captureImage(gl, glBinding, camera) {
-      const frame = glBinding.getCurrentFramebuffer();
-      const width = gl.canvas.width;
-      const height = gl.canvas.height;
-      const imageData = new Uint8Array(width * height * 4);
+      const canvas = gl.canvas;
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      const image = new ImageData(new Uint8ClampedArray(width * height * 4), width, height);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image.data);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
-
-      const tensor = tf.browser.fromPixels(new ImageData(new Uint8ClampedArray(imageData), width, height));
-      const resizedTensor = tf.image.resizeBilinear(tensor, [224, 224]).toFloat().expandDims(0);
-      const prediction = await model.predict(resizedTensor).data();
-
-      const predictionImageData = new Uint8Array(224 * 224 * 4);
-      for (let i = 0; i < prediction.length; i++) {
-        const value = Math.max(0, Math.min(1, prediction[i])) * 255;
-        predictionImageData[i * 4] = value;
-        predictionImageData[i * 4 + 1] = value;
-        predictionImageData[i * 4 + 2] = value;
-        predictionImageData[i * 4 + 3] = 255;  // Alpha channel
-      }
-
-      const predictionImage = new ImageData(new Uint8ClampedArray(predictionImageData), 224, 224);
-      const canvas = document.createElement('canvas');
-      canvas.width = 224;
-      canvas.height = 224;
-      const context = canvas.getContext('2d');
-      context.putImageData(predictionImage, 0, 0);
-
-      const predictionImageElement = document.getElementById('predictionImage');
-      predictionImageElement.src = canvas.toDataURL();
-      predictionImageElement.style.display = 'block';
+      const tensor = tf.browser.fromPixels(image).toFloat().expandDims(0);
+      const prediction = model.predict(tensor);
+      const predictedImageData = await prediction.array();
+      
+      const predictedImage = tf.browser.toPixels(prediction.squeeze());
+      const imgElement = document.getElementById('predictedImage');
+      imgElement.src = URL.createObjectURL(new Blob([predictedImage], {type: 'image/png'}));
+      imgElement.style.display = 'block';
+      
+      document.getElementById('info').innerText += '\nImage captured and processed';
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
-    document.getElementById('captureButton').addEventListener('click', () => captureNext = true);
+    document.getElementById('captureButton').addEventListener('click', () => {
+      captureNext = true;
+    });
   </script>
 </body>
 </html>
