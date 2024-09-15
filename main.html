@@ -111,7 +111,7 @@
           if (flowerInScene) {
             if (captureNext && view.camera) {
               captureNext = false;  // Останавливаем захват после кадра
-              captureImage(gl, glBinding, view.camera, 0);
+              captureImage(gl, glBinding, view.camera);
             }
           }
 
@@ -161,48 +161,144 @@
       }
     }
 
-    async function captureImage(gl, glBinding, dcamera, captureIndex) {
-      const texture = glBinding.getCameraImage(dcamera);
-      const width = dcamera.width;
-      const height = dcamera.height;
+async function captureImage(gl, glBinding, dcamera) {
+  // Получаем текстуру с камеры
+  const texture = glBinding.getCameraImage(dcamera);
+  const width = dcamera.width;
+  const height = dcamera.height;
 
-      if (!texture) {
-        console.error('Failed to get camera texture');
-        document.getElementById('info').innerText += "\nFailed to get camera texture.";
-        return;
-      }
+  if (!texture) {
+    console.error('Failed to get camera texture');
+    return;
+  }
 
-      const scale = 1;
-      const scaledWidth = Math.floor(width * scale);
-      const scaledHeight = Math.floor(height * scale);
-      const textureBytes = scaledWidth * scaledHeight * 4;
+  const scale = 1;
+  const scaledWidth = Math.floor(width * scale);
+  const scaledHeight = Math.floor(height * scale);
+  const textureBytes = scaledWidth * scaledHeight * 4;
 
-      let readbackPixels = new Uint8Array(textureBytes);
-      readbackPixels.fill(0);
+  let readbackPixels = new Uint8Array(textureBytes);
+  readbackPixels.fill(0);
 
-      let copyTexture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, copyTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+  // Создаем текстуру для рендеринга
+  let copyTexture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, copyTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
 
-      let framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
+  // Настройка фреймбуфера
+  let framebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
 
-      gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error("Framebuffer incomplete!");
+    return;
+  }
 
-      const imageData = new ImageData(new Uint8ClampedArray(readbackPixels.buffer), scaledWidth, scaledHeight);
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = scaledWidth;
-      canvas.height = scaledHeight;
-      ctx.putImageData(imageData, 0, 0);
-      canvas.toBlob((blob) => {
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = 'captured_image.png'; // Имя файла для сохранения
-  link.click();
-}, 'image/png');
+  // Шейдеры для копирования текстуры
+  const vertexShaderSource = `
+    attribute vec4 aVertexPosition;
+    varying vec2 vTexCoord;
+    void main(void) {
+      gl_Position = aVertexPosition;
+      vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
+    }
+  `;
+
+  const fragmentShaderSource = `
+    precision mediump float;
+    varying vec2 vTexCoord;
+    uniform sampler2D uSampler;
+    void main(void) {
+      gl_FragColor = texture2D(uSampler, vTexCoord);
+    }
+  `;
+
+  // Компиляция шейдеров
+  const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vertexShader, vertexShaderSource);
+  gl.compileShader(vertexShader);
+
+  if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+    console.error('An error occurred compiling the vertex shader: ' + gl.getShaderInfoLog(vertexShader));
+    gl.deleteShader(vertexShader);
+    return;
+  }
+
+  const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fragmentShader, fragmentShaderSource);
+  gl.compileShader(fragmentShader);
+
+  if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+    console.error('An error occurred compiling the fragment shader: ' + gl.getShaderInfoLog(fragmentShader));
+    gl.deleteShader(fragmentShader);
+    return;
+  }
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+    return;
+  }
+
+  gl.useProgram(program);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.uniform1i(gl.getUniformLocation(program, "uSampler"), 0);
+
+  // Настройка вершин для рендеринга
+  const vertices = new Float32Array([
+    -1.0, -1.0,
+    1.0, -1.0,
+    -1.0, 1.0,
+    1.0, 1.0,
+  ]);
+
+  const positionBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  const position = gl.getAttribLocation(program, "aVertexPosition");
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  // Рендеринг на экран
+  gl.viewport(0, 0, scaledWidth, scaledHeight);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Чтение пикселей с фреймбуфера
+  gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
+
+  // Освобождение ресурсов
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(framebuffer);
+  gl.deleteTexture(copyTexture);
+  gl.deleteProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+  gl.deleteBuffer(positionBuffer);
+
+  // Создание canvas для сохранения изображения
+  let canvas = document.createElement('canvas');
+  canvas.width = scaledWidth;
+  canvas.height = scaledHeight;
+  let context = canvas.getContext('2d');
+
+  // Создание ImageData из считанных пикселей
+  let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
+  context.putImageData(imageData, 0, 0);
+
+  // Сохранение изображения напрямую
+  canvas.toBlob((blob) => {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'captured_image.png';
+    link.click();
+  }, 'image/png');
 
       
 
