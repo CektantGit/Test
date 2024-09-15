@@ -199,7 +199,7 @@
       ctx.putImageData(imageData, 0, 0);
 
       // Преобразование изображения в формат, подходящий для нейросети
-      const imgTensor = tf.browser.fromPixels(canvas, 1);
+      const imgTensor = tf.browser.fromPixels(canvas, 3);
       const normalizedImgTensor =  imgTensor.div(255.0);
 
       // Преобразование изображения в нужный формат для модели
