@@ -29,7 +29,7 @@
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
     let model;
-    const MODEL_PATH = 'JsModel/model.json'; // Путь к модели
+    const MODEL_PATH = 'jsModel/model.json'; // Путь к модели
 
     async function loadModel() {
       model = await tf.loadGraphModel(MODEL_PATH);
