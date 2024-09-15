@@ -132,7 +132,7 @@ async function processFrame(gl, viewCamera) {
   const resultCtx = resultCanvas.getContext('2d');
 
   // Создаём ImageData из массива пикселей
-  const imageData = new ImageData(new Uint8ClampedArray(processedPixels), width, height);
+  const imageData = new ImageData(new Uint8ClampedArray(processedPixels), 100, 100);
   resultCtx.putImageData(imageData, 0, 0);
 
   // Отображаем результат
