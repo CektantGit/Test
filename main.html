@@ -212,8 +212,12 @@
       if (model) {
         const prediction = model.predict(inputTensor);
         const predArray = await prediction.array();
+                              document.getElementById('info').innerText =
+                `YEEE:';
         displayPrediction(predArray);
       } else {
+                      document.getElementById('info').innerText =
+                `Distance Z:';
         console.error("Модель не загружена");
       }
     }
