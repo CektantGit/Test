@@ -17,6 +17,7 @@
     .info { position: absolute; bottom: 10px; right: 150px; z-index: 10; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
     #captureButton { position: absolute; top: 50px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
+    #predictedImage { position: absolute; top: 0; left: 0; z-index: 20; display: none; }
   </style>
 </head>
 <body>
@@ -27,6 +28,9 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
+  
+  <!-- Добавьте элемент изображения для отображения предсказаний -->
+  <img id="predictedImage" alt="Predicted Image">
 
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
@@ -34,11 +38,9 @@
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let captureNext = false;
-    const captures = [];
     let model;
 
     async function loadModel() {
-      // Загрузка модели TensorFlow.js
       model = await tf.loadLayersModel('jsModel/model.json');
       console.log("Модель загружена");
     }
@@ -208,10 +210,28 @@
 
       if (model) {
         const prediction = model.predict(inputTensor);
-        prediction.print();  // Вывод предсказания в консоль для проверки
+        const predArray = await prediction.array();
+        displayPrediction(predArray);
       } else {
         console.error("Модель не загружена");
       }
+    }
+
+    function displayPrediction(predArray) {
+      // Преобразование массива предсказаний в изображение
+      const height = 224;
+      const width = 224;
+      const imageData = new ImageData(new Uint8ClampedArray(predArray.flat()), width, height);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.putImageData(imageData, 0, 0);
+
+      const imgElement = document.getElementById('predictedImage');
+      imgElement.src = canvas.toDataURL();
+      imgElement.style.display = 'block';
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
