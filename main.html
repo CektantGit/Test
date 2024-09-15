@@ -117,13 +117,14 @@ async function processFrame(gl, viewCamera) {
   canvas.height = height;
   const ctx = canvas.getContext('2d');
 
+  // Рисуем изображение с камеры на канвас
   ctx.drawImage(texture, 0, 0, width, height);
 
-  // Прогоняем изображение через модель
+  // Прогоняем изображение через модель (уменьшаем предсказание до 1/4 от оригинала)
   const predictions = await runModel(canvas);
 
   // Масштабируем предсказания и возвращаем пиксели
-  const processedPixels = await postprocess(predictions, width, height);
+  const processedPixels = await postprocess(predictions, width / 4, height / 4);
 
   // Наложение результата на исходное изображение
   const resultCanvas = document.createElement('canvas');
@@ -131,13 +132,19 @@ async function processFrame(gl, viewCamera) {
   resultCanvas.height = height;
   const resultCtx = resultCanvas.getContext('2d');
 
-  // Создаём ImageData из массива пикселей
-  const imageData = new ImageData(new Uint8ClampedArray(processedPixels), 100, 100);
+  // Сначала рисуем исходное изображение на результат
+  resultCtx.drawImage(texture, 0, 0, width, height);
+
+  // Создаем ImageData из предсказания с меньшими размерами
+  const imageData = new ImageData(new Uint8ClampedArray(processedPixels), width / 4, height / 4);
+
+  // Рисуем предсказание в правом верхнем углу
   resultCtx.putImageData(imageData, 0, 0);
 
   // Отображаем результат
   document.body.appendChild(resultCanvas);
 }
+
 
     async function onXRFrame(time, frame) {
       const pose = frame.getViewerPose(referenceSpace);
