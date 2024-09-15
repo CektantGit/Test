@@ -213,7 +213,7 @@
 
         // Обработка и отображение предсказаний
         const unetMask = predictions;
-        const unetMaskArray = new Float32Array(unetMask);
+        const unetMaskArray = unetMask.dataSync();
 
         const maskCanvas = document.createElement('canvas');
         maskCanvas.width = 224;
