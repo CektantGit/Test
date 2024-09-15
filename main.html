@@ -34,7 +34,8 @@
     let captureNext = false;
     const captures = [];
     let model;
-    let predictionCanvas, predictionContext;
+    const TARGET_SIZE = 224; // Размер для изменения разрешения
+    const ORIGINAL_SIZE = 1024; // Примерный исходный размер (измените на актуальный)
 
     function logInfo(message) {
       const infoElement = document.getElementById('info');
@@ -287,25 +288,32 @@
 
       logInfo('Image captured from WebGL.');
 
-      const imageData = new Uint8ClampedArray(readbackPixels.buffer);
       const canvas = document.createElement('canvas');
-      canvas.width = scaledWidth;
-      canvas.height = scaledHeight;
+      canvas.width = TARGET_SIZE;
+      canvas.height = TARGET_SIZE;
       const context = canvas.getContext('2d');
+      const imageData = new Uint8ClampedArray(readbackPixels.buffer);
       const image = new ImageData(imageData, scaledWidth, scaledHeight);
       context.putImageData(image, 0, 0);
 
+      // Изменение размера изображения
+      const resizedCanvas = document.createElement('canvas');
+      resizedCanvas.width = TARGET_SIZE;
+      resizedCanvas.height = TARGET_SIZE;
+      const resizedContext = resizedCanvas.getContext('2d');
+      resizedContext.drawImage(canvas, 0, 0, TARGET_SIZE, TARGET_SIZE);
+
       try {
         logInfo('Preparing image for model prediction.');
-        const inputImage = tf.browser.fromPixels(canvas).toFloat().expandDims(0);
+        const inputImage = tf.browser.fromPixels(resizedCanvas).toFloat().expandDims(0);
         const prediction = await model.predict(inputImage).squeeze().array();
         logInfo('Prediction completed.');
 
         const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = scaledWidth;
-        outputCanvas.height = scaledHeight;
+        outputCanvas.width = TARGET_SIZE;
+        outputCanvas.height = TARGET_SIZE;
         const outputContext = outputCanvas.getContext('2d');
-        const outputImageData = new ImageData(new Uint8ClampedArray(prediction[0]), scaledWidth, scaledHeight);
+        const outputImageData = new ImageData(new Uint8ClampedArray(prediction[0]), TARGET_SIZE, TARGET_SIZE);
         outputContext.putImageData(outputImageData, 0, 0);
 
         const dataURL = outputCanvas.toDataURL();
