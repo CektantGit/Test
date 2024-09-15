@@ -209,12 +209,12 @@
       try {
         const predictions = await model.predict(batchedImgTensor).array();
         console.log("Model predictions:", predictions);
-        document.getElementById('info').innerText += "\nModel predictions: " + JSON.stringify(predictions);
-
+       // document.getElementById('info').innerText += "\nModel predictions: " + JSON.stringify(predictions);
+         document.getElementById('info').innerText  += "Start convert predict"
         // Обработка и отображение предсказаний
         const unetMask = predictions;
         const unetMaskArray = unetMask.dataSync();
-
+        document.getElementById('info').innerText  += "datasync"
         const maskCanvas = document.createElement('canvas');
         maskCanvas.width = 224;
         maskCanvas.height = 224;
