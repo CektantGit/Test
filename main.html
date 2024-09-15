@@ -8,6 +8,7 @@
   <script src="https://unpkg.com/three@0.122.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://unpkg.com/three@0.122.0/examples/js/vr/ARButton.js"></script>
   <script src="https://stuk.github.io/jszip/dist/jszip.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script> <!-- TensorFlow.js -->
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -27,13 +28,12 @@
 
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
-    let flowerPlaced = false;
-    let zDistance = 0;
-    let rotationVector = new THREE.Vector3(0, 0, 0);
-    let captureNext = false;
-    let captureCount = 0;
-    const maxCaptures = 10;
-    const captures = [];
+    let model;
+    const MODEL_PATH = 'JsModel/model.json'; // Путь к модели
+
+    async function loadModel() {
+      model = await tf.loadGraphModel(MODEL_PATH);
+    }
 
     async function activateXR() {
       const canvas = document.createElement('canvas');
@@ -70,275 +70,80 @@
         flower = gltf.scene;
       });
 
-      const onXRFrame = (time, frame) => {
-        session.requestAnimationFrame(onXRFrame);
-
-        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
-
-        const pose = frame.getViewerPose(referenceSpace);
-        if (pose) {
-          const view = pose.views[0];
-
-          const viewport = session.renderState.baseLayer.getViewport(view);
-          renderer.setSize(viewport.width, viewport.height);
-
-          camera.matrix.fromArray(view.transform.matrix);
-          camera.projectionMatrix.fromArray(view.projectionMatrix);
-          camera.updateMatrixWorld(true);
-
-          const hitTestResults = frame.getHitTestResults(hitTestSource);
-          if (hitTestResults.length > 0 && reticle) {
-            const hitPose = hitTestResults[0].getPose(referenceSpace);
-            reticle.visible = true;
-            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
-            reticle.updateMatrixWorld(true);
-          }
-
-          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-          if (flowerInScene) {
-            if (captureNext && view.camera) {
-              zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
-
-              const cameraOrientation = pose.views[0].transform.orientation;
-              const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
-
-              const gravityVector = new THREE.Vector3(0, -1, 0);
-              const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
-
-              const angle = downVector.angleTo(gravityVector);
-              const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-              const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-              const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-              rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
-
-              const radToDeg = 180 / Math.PI;
-              const rotationVectorDegrees = new THREE.Vector3(
-                rotationVector.x * radToDeg,
-                rotationVector.y * radToDeg,
-                rotationVector.z * radToDeg
-              );
-
-              document.getElementById('info').innerText =
-                `Distance Z: ${zDistance.toFixed(2)}\n` +
-                `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
-              // Сохраняем данные
-              captures.push({
-                zDistance: zDistance,
-                rotationVectorDegrees: rotationVectorDegrees,
-                imageBlob: null
-              });
-
-              // Захватываем изображение
-              captureImage(gl, glBinding, view.camera, captures.length - 1);
-              captureNext = false;
-              captureCount++;
-
-            }
-          }
-
-          renderer.render(scene, camera);
-        }
-      };
-
       session.requestAnimationFrame(onXRFrame);
+    }
 
-      document.getElementById('startARBtn').style.display = 'none';
-      document.querySelector('.overlay').style.display = 'block';
+    function preprocessImage(image) {
+      return tf.tidy(() => {
+        let tensor = tf.browser.fromPixels(image);
+        tensor = tf.image.resizeBilinear(tensor, [224, 224]);
+        tensor = tensor.expandDims(0).toFloat().div(255);
+        return tensor;
+      });
+    }
 
-      document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
-      document.getElementById('showInfoBtn').addEventListener('click', showInfo);
+    async function runModel(image) {
+      const preprocessed = preprocessImage(image);
+      const predictions = await model.predict(preprocessed);
+      return predictions;
+    }
+
+    async function postprocess(predictions, originalWidth, originalHeight) {
+      const result = tf.tidy(() => {
+        let tensor = predictions.squeeze().mul(255).cast('int32');
+        tensor = tf.image.resizeBilinear(tensor, [originalHeight, originalWidth]);
+        return tensor;
+      });
+      return await tf.browser.toPixels(result);
+    }
+
+    async function processFrame(gl, viewCamera) {
+      const texture = glBinding.getCameraImage(viewCamera);
+      const width = viewCamera.width;
+      const height = viewCamera.height;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      ctx.drawImage(texture, 0, 0, width, height);
+
+      const predictions = await runModel(canvas);
+      const processedPixels = await postprocess(predictions, width, height);
+
+      // Наложение результата на исходное изображение
+      const resultCanvas = document.createElement('canvas');
+      resultCanvas.width = width;
+      resultCanvas.height = height;
+      const resultCtx = resultCanvas.getContext('2d');
+
+      const imageData = new ImageData(new Uint8ClampedArray(processedPixels), width, height);
+      resultCtx.putImageData(imageData, 0, 0);
+
+      document.body.appendChild(resultCanvas); // Временно для отображения результата
+    }
+
+    async function onXRFrame(time, frame) {
+      const pose = frame.getViewerPose(referenceSpace);
+      if (pose) {
+        const view = pose.views[0];
+
+        // Обработка кадра
+        await processFrame(gl, view.camera);
+
+        renderer.render(scene, camera);
+      }
     }
 
     async function startAR() {
+      await loadModel(); // Загрузка модели
       if (navigator.xr) {
         await activateXR();
       } else {
         alert('WebXR not supported');
       }
     }
-
-    async function placeFlower() {
-      if (!flower) return;
-
-      if (!flowerPlaced) {
-        const flowerClone = flower.clone();
-        flowerClone.position.copy(reticle.position);
-        flowerClone.name = 'sunflower';
-        scene.add(flowerClone);
-        flowerPlaced = true;
-      } else {
-        const flowerInScene = scene.children.find(child => child.name === 'sunflower');
-        if (flowerInScene) {
-          flowerInScene.position.copy(reticle.position);
-        }
-      }
-    }
-
-    function showInfo() {
-      if (!flowerPlaced) {
-        document.getElementById('info').innerText = 'Flower not placed yet.';
-        return;
-      }
-      if (captureCount >= maxCaptures) {
-                generateArchive();
-      } else {
-      captureNext = true;
-      }
-    }
-
-    async function captureImage(gl, glBinding, dcamera, captureIndex) {
-      const texture = glBinding.getCameraImage(dcamera);
-      const width = dcamera.width;
-      const height = dcamera.height;
-
-      if (!texture) {
-        console.error('Failed to get camera texture');
-        return;
-      }
-
-      const scale = 1;
-      const scaledWidth = Math.floor(width * scale);
-      const scaledHeight = Math.floor(height * scale);
-      const textureBytes = scaledWidth * scaledHeight * 4;
-
-      let readbackPixels = new Uint8Array(textureBytes);
-      readbackPixels.fill(0);
-
-      let copyTexture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, copyTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-
-      let framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
-
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        console.error("Framebuffer incomplete!");
-        return;
-      }
-
-      const vertexShaderSource = `
-        attribute vec4 aVertexPosition;
-        varying vec2 vTexCoord;
-        void main(void) {
-          gl_Position = aVertexPosition;
-          vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
-        }
-      `;
-      const fragmentShaderSource = `
-        precision mediump float;
-        varying vec2 vTexCoord;
-        uniform sampler2D uSampler;
-        void main(void) {
-          gl_FragColor = texture2D(uSampler, vTexCoord);
-        }
-      `;
-
-      const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-      gl.shaderSource(vertexShader, vertexShaderSource);
-      gl.compileShader(vertexShader);
-      if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-        console.error('An error occurred compiling the vertex shader: ' + gl.getShaderInfoLog(vertexShader));
-        gl.deleteShader(vertexShader);
-        return;
-      }
-
-      const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-      gl.shaderSource(fragmentShader, fragmentShaderSource);
-      gl.compileShader(fragmentShader);
-      if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-        console.error('An error occurred compiling the fragment shader: ' + gl.getShaderInfoLog(fragmentShader));
-        gl.deleteShader(fragmentShader);
-        return;
-      }
-
-      const program = gl.createProgram();
-      gl.attachShader(program, vertexShader);
-      gl.attachShader(program, fragmentShader);
-      gl.linkProgram(program);
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
-        return;
-      }
-
-      gl.useProgram(program);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(gl.getUniformLocation(program, "uSampler"), 0);
-
-      const vertices = new Float32Array([
-        -1.0, -1.0,
-         1.0, -1.0,
-        -1.0,  1.0,
-         1.0,  1.0,
-      ]);
-      const positionBuffer = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-      const position = gl.getAttribLocation(program, "aVertexPosition");
-      gl.enableVertexAttribArray(position);
-      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-
-      gl.viewport(0, 0, scaledWidth, scaledHeight);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-      gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
-
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.deleteFramebuffer(framebuffer);
-      gl.deleteTexture(copyTexture);
-      gl.deleteProgram(program);
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
-      gl.deleteBuffer(positionBuffer);
-
-      let canvas = document.createElement('canvas');
-      canvas.width = scaledWidth;
-      canvas.height = scaledHeight;
-      let context = canvas.getContext('2d');
-
-      let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
-      context.putImageData(imageData, 0, 0);
-
-      canvas.toBlob((blob) => {
-        captures[captureIndex].imageBlob = blob;
-      }, 'image/png');
-    }
-
-// Функция сброса состояния после создания архива
-  function resetState() {
-    captureCount = 0;
-    captures.length = 0;
-    captureNext = false;
-
-    // Очищаем информацию на экране
-    document.getElementById('info').innerText = 'Начинаем новый сбор данных.';
-  }
-
-  function generateArchive() {
-    const zip = new JSZip();
-
-    captures.forEach((capture, index) => {
-      zip.file(`image_${index + 1}.png`, capture.imageBlob);
-      const info = `Distance Z: ${capture.zDistance.toFixed(2)}\n` +
-                   `Rotation Vector (Degrees): (${capture.rotationVectorDegrees.x.toFixed(2)}, ${capture.rotationVectorDegrees.y.toFixed(2)}, ${capture.rotationVectorDegrees.z.toFixed(2)})\n`;
-      zip.file(`info_${index + 1}.txt`, info);
-    });
-
-    zip.generateAsync({ type: 'blob' }).then((blob) => {
-      const url = URL.createObjectURL(blob);
-      let link = document.createElement('a');
-      link.href = url;
-      link.download = 'captures.zip';
-      link.click();
-      URL.revokeObjectURL(url);
-      
-      // После скачивания архива обнуляем состояние
-      resetState();
-    });
-  }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
   </script>
