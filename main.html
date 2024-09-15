@@ -17,7 +17,6 @@
     .info { position: absolute; bottom: 10px; right: 150px; z-index: 10; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
     #captureButton { position: absolute; top: 50px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
-    #predictedImage { position: absolute; bottom: 10px; right: 10px; z-index: 10; }
   </style>
 </head>
 <body>
@@ -28,23 +27,23 @@
     <button class="button" id="showInfoBtn">Show Info</button>
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
-  <img id="predictedImage" style="display: none;"/>
 
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
     let flowerPlaced = false;
-    let zDistance = 0;
-    let rotationVector = new THREE.Vector3(0, 0, 0);
     let captureNext = false;
     const captures = [];
     let model;
+    let predictionCanvas, predictionContext;
 
     async function loadModel() {
       try {
         model = await tf.loadLayersModel('jsModel/model.json');
-        document.getElementById('info').innerText = "Модель загружена";
+        console.log("Model loaded successfully.");
+        document.getElementById('info').innerText += "\nModel loaded successfully.";
       } catch (error) {
-        document.getElementById('info').innerText = `Ошибка загрузки модели: ${error.message}`;
+        console.error("Failed to load model: ", error);
+        document.getElementById('info').innerText += "\nFailed to load model: " + error;
       }
     }
 
@@ -113,31 +112,6 @@
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
             if (captureNext && view.camera) {
-              zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
-
-              const cameraOrientation = pose.views[0].transform.orientation;
-              const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
-
-              const gravityVector = new THREE.Vector3(0, -1, 0);
-              const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
-
-              const angle = downVector.angleTo(gravityVector);
-              const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
-              const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
-              const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
-              rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
-
-              const radToDeg = 180 / Math.PI;
-              const rotationVectorDegrees = new THREE.Vector3(
-                rotationVector.x * radToDeg,
-                rotationVector.y * radToDeg,
-                rotationVector.z * radToDeg
-              );
-
-              document.getElementById('info').innerText =
-                `Distance Z: ${zDistance.toFixed(2)}\n` +
-                `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-
               captureNext = false;  // Останавливаем захват после кадра
               await captureImage(gl, glBinding, view.camera);
             }
@@ -161,7 +135,7 @@
         await loadModel();  // Загрузка модели перед началом XR-сессии
         await activateXR();
       } else {
-        document.getElementById('info').innerText = 'WebXR not supported';
+        alert('WebXR not supported');
       }
     }
 
@@ -184,30 +158,72 @@
 
     function showInfo() {
       if (!flowerPlaced) {
-        document.getElementById('info').innerText = 'Flower not placed';
-      } else {
-        document.getElementById('info').innerText = `Flower position: (${flower.position.x.toFixed(2)}, ${flower.position.y.toFixed(2)}, ${flower.position.z.toFixed(2)})`;
+        document.getElementById('info').innerText = 'Flower not placed yet.';
+        return;
       }
     }
 
-    async function captureImage(gl, glBinding, camera) {
-      const canvas = gl.canvas;
-      const width = canvas.width;
-      const height = canvas.height;
-      
-      const image = new ImageData(new Uint8ClampedArray(width * height * 4), width, height);
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image.data);
+    async function captureImage(gl, glBinding, dcamera) {
+      const texture = glBinding.getCameraImage(dcamera);
+      const width = dcamera.width;
+      const height = dcamera.height;
 
-      const tensor = tf.browser.fromPixels(image).toFloat().expandDims(0);
-      const prediction = model.predict(tensor);
-      const predictedImageData = await prediction.array();
-      
-      const predictedImage = tf.browser.toPixels(prediction.squeeze());
-      const imgElement = document.getElementById('predictedImage');
-      imgElement.src = URL.createObjectURL(new Blob([predictedImage], {type: 'image/png'}));
-      imgElement.style.display = 'block';
-      
-      document.getElementById('info').innerText += '\nImage captured and processed';
+      if (!texture) {
+        console.error('Failed to get camera texture');
+        document.getElementById('info').innerText += "\nFailed to get camera texture";
+        return;
+      }
+
+      const scale = 1;
+      const scaledWidth = Math.floor(width * scale);
+      const scaledHeight = Math.floor(height * scale);
+      const textureBytes = scaledWidth * scaledHeight * 4;
+
+      let readbackPixels = new Uint8Array(textureBytes);
+      readbackPixels.fill(0);
+
+      let copyTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, copyTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+
+      let framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
+
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error("Framebuffer incomplete!");
+        document.getElementById('info').innerText += "\nFramebuffer incomplete!";
+        return;
+      }
+
+      gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
+
+      const imageData = new Uint8ClampedArray(readbackPixels.buffer);
+      const canvas = document.createElement('canvas');
+      canvas.width = scaledWidth;
+      canvas.height = scaledHeight;
+      const context = canvas.getContext('2d');
+      const image = new ImageData(imageData, scaledWidth, scaledHeight);
+      context.putImageData(image, 0, 0);
+
+      const inputImage = tf.browser.fromPixels(canvas).toFloat().expandDims(0);
+      const prediction = await model.predict(inputImage).squeeze().array();
+
+      const outputCanvas = document.createElement('canvas');
+      outputCanvas.width = scaledWidth;
+      outputCanvas.height = scaledHeight;
+      const outputContext = outputCanvas.getContext('2d');
+      const outputImageData = new ImageData(new Uint8ClampedArray(prediction[0]), scaledWidth, scaledHeight);
+      outputContext.putImageData(outputImageData, 0, 0);
+
+      const dataURL = outputCanvas.toDataURL();
+      const a = document.createElement('a');
+      a.href = dataURL;
+      a.download = 'prediction.png';
+      a.click();
+
+      document.getElementById('info').innerText += "\nCaptured and predicted image.";
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
