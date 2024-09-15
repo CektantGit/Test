@@ -97,41 +97,47 @@ async function runModel(image) {
   return prediction;
 }
 
-    async function postprocess(predictions, originalWidth, originalHeight) {
-      const result = tf.tidy(() => {
-        let tensor = predictions.squeeze().mul(255).cast('int32');
-        tensor = tf.image.resizeBilinear(tensor, [originalHeight, originalWidth]);
-        return tensor;
-      });
-      return await tf.browser.toPixels(result);
-    }
+async function postprocess(predictions, width, height) {
+  // Умножаем значения предсказания на 255 для видимости
+  const scaledPredictions = predictions.mul(tf.scalar(255));
 
-    async function processFrame(gl, viewCamera) {
-      const texture = glBinding.getCameraImage(viewCamera);
-      const width = viewCamera.width;
-      const height = viewCamera.height;
+  // Преобразуем предсказание в массив пикселей
+  const processedPixels = await scaledPredictions.data(); // Достаём значения из тензора
+  
+  return processedPixels;
+}
 
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
+async function processFrame(gl, viewCamera) {
+  const texture = glBinding.getCameraImage(viewCamera);
+  const width = viewCamera.width;
+  const height = viewCamera.height;
 
-      ctx.drawImage(texture, 0, 0, width, height);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
 
-      const predictions = await runModel(canvas);
-      const processedPixels = await postprocess(predictions, width, height);
+  ctx.drawImage(texture, 0, 0, width, height);
 
-      // Наложение результата на исходное изображение
-      const resultCanvas = document.createElement('canvas');
-      resultCanvas.width = width;
-      resultCanvas.height = height;
-      const resultCtx = resultCanvas.getContext('2d');
+  // Прогоняем изображение через модель
+  const predictions = await runModel(canvas);
 
-      const imageData = new ImageData(new Uint8ClampedArray(processedPixels), width, height);
-      resultCtx.putImageData(imageData, 0, 0);
+  // Масштабируем предсказания и возвращаем пиксели
+  const processedPixels = await postprocess(predictions, width, height);
 
-      document.body.appendChild(resultCanvas); // Временно для отображения результата
-    }
+  // Наложение результата на исходное изображение
+  const resultCanvas = document.createElement('canvas');
+  resultCanvas.width = width;
+  resultCanvas.height = height;
+  const resultCtx = resultCanvas.getContext('2d');
+
+  // Создаём ImageData из массива пикселей
+  const imageData = new ImageData(new Uint8ClampedArray(processedPixels), width, height);
+  resultCtx.putImageData(imageData, 0, 0);
+
+  // Отображаем результат
+  document.body.appendChild(resultCanvas);
+}
 
     async function onXRFrame(time, frame) {
       const pose = frame.getViewerPose(referenceSpace);
