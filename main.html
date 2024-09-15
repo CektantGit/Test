@@ -82,11 +82,20 @@
       });
     }
 
-    async function runModel(image) {
-      const preprocessed = preprocessImage(image);
-      const predictions = await model.predict(preprocessed);
-      return predictions;
-    }
+async function runModel(image) {
+  // Преобразование изображения в тензор
+  const inputTensor = tf.browser.fromPixels(image)
+    .resizeBilinear([224, 224])  // Изменение размера
+    .expandDims(0)  // Добавление измерения батча
+    .toFloat()
+    .div(tf.scalar(255.0));  // Нормализация пикселей
+  
+  // Выполнение предсказания
+  const prediction = await model.predict(inputTensor);
+  
+  // Возвращаем предсказание
+  return prediction;
+}
 
     async function postprocess(predictions, originalWidth, originalHeight) {
       const result = tf.tidy(() => {
