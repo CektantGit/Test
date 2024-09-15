@@ -32,7 +32,7 @@
     const MODEL_PATH = 'jsModel/model.json'; // Путь к модели
 
     async function loadModel() {
-     // model = await tf.loadGraphModel(MODEL_PATH);
+      model = await tf.loadLayersModel(MODEL_PATH);
     }
 
     async function activateXR() {
@@ -84,7 +84,7 @@
 
 async function runModel(image) {
   // Преобразование изображения в тензор
- /* const inputTensor = tf.browser.fromPixels(image)
+  const inputTensor = tf.browser.fromPixels(image)
     .resizeBilinear([224, 224])  // Изменение размера
     .expandDims(0)  // Добавление измерения батча
     .toFloat()
@@ -94,7 +94,7 @@ async function runModel(image) {
   const prediction = await model.predict(inputTensor);
   
   // Возвращаем предсказание
-  return prediction;*/
+  return prediction;
 }
 
     async function postprocess(predictions, originalWidth, originalHeight) {
