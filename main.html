@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/three@0.122.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://unpkg.com/three@0.122.0/examples/js/vr/ARButton.js"></script>
   <script src="https://stuk.github.io/jszip/dist/jszip.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script> <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.7.0/dist/tf.min.js"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -16,10 +16,12 @@
     .button { display: block; margin: 5px 0; padding: 10px; background: rgba(0, 0, 0, 0.5); color: white; border: none; border-radius: 5px; cursor: pointer; }
     .info { position: absolute; bottom: 10px; right: 150px; z-index: 10; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
+    #captureButton { position: absolute; top: 50px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
   </style>
 </head>
 <body>
   <button id="startARBtn">Start AR</button>
+  <button id="captureButton">Capture Image</button>
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
     <button class="button" id="showInfoBtn">Show Info</button>
@@ -28,11 +30,17 @@
 
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
+    let flowerPlaced = false;
+    let zDistance = 0;
+    let rotationVector = new THREE.Vector3(0, 0, 0);
+    let captureNext = false;
+    const captures = [];
     let model;
-    const MODEL_PATH = 'jsModel/model.json'; // Путь к модели
 
     async function loadModel() {
-      model = await tf.loadLayersModel(MODEL_PATH);
+      // Загрузка модели TensorFlow.js
+      model = await tf.loadGraphModel('jsModel/model.json');
+      console.log("Модель загружена");
     }
 
     async function activateXR() {
@@ -40,7 +48,10 @@
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', { xrCompatible: true });
 
-      session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body } });
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
+        domOverlay: { root: document.body }
+      });
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
       glBinding = new XRWebGLBinding(session, gl);
@@ -70,104 +81,143 @@
         flower = gltf.scene;
       });
 
+      const onXRFrame = async (time, frame) => {
+        session.requestAnimationFrame(onXRFrame);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const view = pose.views[0];
+
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
+
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0 && reticle) {
+            const hitPose = hitTestResults[0].getPose(referenceSpace);
+            reticle.visible = true;
+            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
+            reticle.updateMatrixWorld(true);
+          }
+
+          const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+          if (flowerInScene) {
+            if (captureNext && view.camera) {
+              zDistance = flowerInScene.position.y - pose.views[0].transform.position.y;
+
+              const cameraOrientation = pose.views[0].transform.orientation;
+              const cameraQuaternion = new THREE.Quaternion(cameraOrientation.x, cameraOrientation.y, cameraOrientation.z, cameraOrientation.w);
+
+              const gravityVector = new THREE.Vector3(0, -1, 0);
+              const downVector = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQuaternion);
+
+              const angle = downVector.angleTo(gravityVector);
+              const rotationAxis = new THREE.Vector3().crossVectors(downVector, gravityVector).normalize();
+              const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+              const euler = new THREE.Euler().setFromQuaternion(rotationQuaternion, 'XYZ');
+              rotationVector = new THREE.Vector3(euler.x, euler.y, euler.z);
+
+              const radToDeg = 180 / Math.PI;
+              const rotationVectorDegrees = new THREE.Vector3(
+                rotationVector.x * radToDeg,
+                rotationVector.y * radToDeg,
+                rotationVector.z * radToDeg
+              );
+
+              document.getElementById('info').innerText =
+                `Distance Z: ${zDistance.toFixed(2)}\n` +
+                `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
+
+              captureNext = false;  // Останавливаем захват после кадра
+              captureImage(frame, view.camera);
+            }
+          }
+
+          renderer.render(scene, camera);
+        }
+      };
+
       session.requestAnimationFrame(onXRFrame);
-    }
 
-    function preprocessImage(image) {
-      return tf.tidy(() => {
-        let tensor = tf.browser.fromPixels(image);
-        tensor = tf.image.resizeBilinear(tensor, [224, 224]);
-        tensor = tensor.expandDims(0).toFloat().div(255);
-        return tensor;
-      });
-    }
+      document.getElementById('startARBtn').style.display = 'none';
+      document.querySelector('.overlay').style.display = 'block';
 
-async function runModel(image) {
-  // Преобразование изображения в тензор
-  const inputTensor = tf.browser.fromPixels(image)
-    .resizeBilinear([224, 224])  // Изменение размера
-    .expandDims(0)  // Добавление измерения батча
-    .toFloat()
-    .div(tf.scalar(255.0));  // Нормализация пикселей
-  
-  // Выполнение предсказания
-  const prediction = await model.predict(inputTensor);
-  
-  // Возвращаем предсказание
-  return prediction;
-}
-
-async function postprocess(predictions, width, height) {
-  // Умножаем значения предсказания на 255 для видимости
-  const scaledPredictions = predictions.mul(tf.scalar(255));
-
-  // Преобразуем предсказание в массив пикселей
-  const processedPixels = await scaledPredictions.data(); // Достаём значения из тензора
-  
-  return processedPixels;
-}
-
-async function processFrame(gl, viewCamera) {
-  const texture = glBinding.getCameraImage(viewCamera);
-  const width = viewCamera.width;
-  const height = viewCamera.height;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-
-  // Рисуем изображение с камеры на канвас
-  ctx.drawImage(texture, 0, 0, width, height);
-
-  // Прогоняем изображение через модель (уменьшаем предсказание до 1/4 от оригинала)
-  const predictions = await runModel(canvas);
-
-  // Масштабируем предсказания и возвращаем пиксели
-  const processedPixels = await postprocess(predictions, width / 4, height / 4);
-
-  // Наложение результата на исходное изображение
-  const resultCanvas = document.createElement('canvas');
-  resultCanvas.width = width/4;
-  resultCanvas.height = height/4;
-  const resultCtx = resultCanvas.getContext('2d');
-
-  // Сначала рисуем исходное изображение на результат
-  resultCtx.drawImage(texture, 0, 0, width, height);
-
-  // Создаем ImageData из предсказания с меньшими размерами
-  const imageData = new ImageData(new Uint8ClampedArray(processedPixels), width / 4, height / 4);
-
-  // Рисуем предсказание в правом верхнем углу
-  resultCtx.putImageData(imageData, 0, 0);
-
-  // Отображаем результат
-  document.body.appendChild(resultCanvas);
-}
-
-
-    async function onXRFrame(time, frame) {
-      const pose = frame.getViewerPose(referenceSpace);
-      if (pose) {
-        const view = pose.views[0];
-
-        // Обработка кадра
-        await processFrame(gl, view.camera);
-
-        renderer.render(scene, camera);
-      }
+      document.getElementById('placeFlowerBtn').addEventListener('click', placeFlower);
+      document.getElementById('showInfoBtn').addEventListener('click', showInfo);
     }
 
     async function startAR() {
-      await loadModel(); // Загрузка модели
       if (navigator.xr) {
+        await loadModel();  // Загрузка модели перед началом XR-сессии
         await activateXR();
       } else {
         alert('WebXR not supported');
       }
     }
 
+    async function placeFlower() {
+      if (!flower) return;
+
+      if (!flowerPlaced) {
+        const flowerClone = flower.clone();
+        flowerClone.position.copy(reticle.position);
+        flowerClone.name = 'sunflower';
+        scene.add(flowerClone);
+        flowerPlaced = true;
+      } else {
+        const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+        if (flowerInScene) {
+          flowerInScene.position.copy(reticle.position);
+        }
+      }
+    }
+
+    function showInfo() {
+      if (!flowerPlaced) {
+        document.getElementById('info').innerText = 'Flower not placed yet.';
+        return;
+      }
+    }
+
+    async function captureImage(frame, camera) {
+      const width = camera.width;
+      const height = camera.height;
+
+      const glBinding = new XRWebGLBinding(session, gl);
+      const texture = glBinding.getCameraImage(camera);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      ctx.drawImage(texture, 0, 0, width, height);
+
+      const imageData = ctx.getImageData(0, 0, width, height);
+
+      processImageWithModel(imageData);
+    }
+
+    async function processImageWithModel(imageData) {
+      const inputTensor = tf.browser.fromPixels(imageData).expandDims(0).toFloat().div(255);
+
+      if (model) {
+        const prediction = model.predict(inputTensor);
+        prediction.print();  // Вывод предсказания в консоль для проверки
+      } else {
+        console.error("Модель не загружена");
+      }
+    }
+
     document.getElementById('startARBtn').addEventListener('click', startAR);
+    document.getElementById('captureButton').addEventListener('click', () => {
+      captureNext = true;
+    });
   </script>
 </body>
 </html>
