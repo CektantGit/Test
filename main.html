@@ -17,7 +17,7 @@
     .info { position: absolute; bottom: 10px; right: 150px; z-index: 10; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
     #captureButton { position: absolute; top: 50px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
-    #predictedImage { position: absolute; top: 0; left: 0; z-index: 20; display: none; }
+    #predictionCanvas { position: absolute; top: 0; left: 0; z-index: 15; }
   </style>
 </head>
 <body>
@@ -26,12 +26,9 @@
   <div class="overlay" style="display: none;">
     <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
     <button class="button" id="showInfoBtn">Show Info</button>
-      <!-- Добавьте элемент изображения для отображения предсказаний -->
-  <img id="predictedImage" alt="Predicted Image">
   </div>
   <div class="info" id="info">Information will be displayed here.</div>
-  
-
+  <canvas id="predictionCanvas"></canvas>
 
   <script>
     let flower, reticle, camera, scene, renderer, session, glBinding;
@@ -39,9 +36,11 @@
     let zDistance = 0;
     let rotationVector = new THREE.Vector3(0, 0, 0);
     let captureNext = false;
+    const captures = [];
     let model;
 
     async function loadModel() {
+      // Загрузка модели TensorFlow.js
       model = await tf.loadLayersModel('jsModel/model.json');
       console.log("Модель загружена");
     }
@@ -131,13 +130,13 @@
                 rotationVector.y * radToDeg,
                 rotationVector.z * radToDeg
               );
-              document.getElementById('info').innerText = "capture";
-          /*    document.getElementById('info').innerText =
+
+              document.getElementById('info').innerText =
                 `Distance Z: ${zDistance.toFixed(2)}\n` +
                 `Camera to Gravity Angle: (${rotationVectorDegrees.x.toFixed(2)}°, ${rotationVectorDegrees.y.toFixed(2)}°, ${rotationVectorDegrees.z.toFixed(2)}°)`;
-*/
+
               captureNext = false;  // Останавливаем захват после кадра
-              captureImage(frame, view.camera);
+              await captureImage(gl, glBinding, view.camera, 0);
             }
           }
 
@@ -180,69 +179,155 @@
       }
     }
 
-    function showInfo() {
-      if (!flowerPlaced) {
-        document.getElementById('info').innerText = 'Flower not placed yet.';
+    async function showInfo() {
+      const flowerInScene = scene.children.find(child => child.name === 'sunflower');
+      if (flowerInScene) {
+        const flowerPosition = flowerInScene.position;
+        document.getElementById('info').innerText =
+          `Flower Position:\n` +
+          `X: ${flowerPosition.x.toFixed(2)}\n` +
+          `Y: ${flowerPosition.y.toFixed(2)}\n` +
+          `Z: ${flowerPosition.z.toFixed(2)}`;
+      }
+    }
+
+    async function captureImage(gl, glBinding, dcamera, captureIndex) {
+      const texture = glBinding.getCameraImage(dcamera);
+      const width = dcamera.width;
+      const height = dcamera.height;
+
+      if (!texture) {
+        console.error('Failed to get camera texture');
         return;
       }
-    }
 
-    async function captureImage(frame, camera) {
-      document.getElementById('info').innerText = 'Start';
-      const width = camera.width;
-      const height = camera.height;
+      const scale = 1;
+      const scaledWidth = Math.floor(width * scale);
+      const scaledHeight = Math.floor(height * scale);
+      const textureBytes = scaledWidth * scaledHeight * 4;
 
-      const glBinding = new XRWebGLBinding(session, gl);
-      const texture = glBinding.getCameraImage(camera);
+      let readbackPixels = new Uint8Array(textureBytes);
+      readbackPixels.fill(0);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
+      let copyTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, copyTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
 
-      ctx.drawImage(texture, 0, 0, width, height);
+      let framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
 
-      const imageData = ctx.getImageData(0, 0, width, height);
-      document.getElementById('info').innerText = 'POST';
-      processImageWithModel(imageData);
-    }
-
-    async function processImageWithModel(imageData) {
-      const inputTensor = tf.browser.fromPixels(imageData).expandDims(0).toFloat().div(255);
-      document.getElementById('info').innerText = "asddddddd";
-      if (model) {
-        const prediction = model.predict(inputTensor);
-        const predArray = await prediction.array();
-        document.getElementById('info').innerText = "YEEE";
-        displayPrediction(predArray);
-      } else {
-        document.getElementById('info').innerText =   "Dis";
-        console.error("Модель не загружена");
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error("Framebuffer incomplete!");
+        return;
       }
+
+      const vertexShaderSource = 
+        `attribute vec4 aVertexPosition;
+        varying vec2 vTexCoord;
+        void main(void) {
+          gl_Position = aVertexPosition;
+          vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
+        }`;
+      const fragmentShaderSource = 
+        `precision mediump float;
+        varying vec2 vTexCoord;
+        uniform sampler2D uSampler;
+        void main(void) {
+          gl_FragColor = texture2D(uSampler, vTexCoord);
+        }`;
+
+      const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vertexShader, vertexShaderSource);
+      gl.compileShader(vertexShader);
+      if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+        console.error('An error occurred compiling the vertex shader: ' + gl.getShaderInfoLog(vertexShader));
+        gl.deleteShader(vertexShader);
+        return;
+      }
+
+      const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fragmentShader, fragmentShaderSource);
+      gl.compileShader(fragmentShader);
+      if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+        console.error('An error occurred compiling the fragment shader: ' + gl.getShaderInfoLog(fragmentShader));
+        gl.deleteShader(fragmentShader);
+        return;
+      }
+
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+        return;
+      }
+
+      gl.useProgram(program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(gl.getUniformLocation(program, "uSampler"), 0);
+
+      const vertices = new Float32Array([
+        -1.0, -1.0,
+         1.0, -1.0,
+        -1.0,  1.0,
+         1.0,  1.0,
+      ]);
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+      const position = gl.getAttribLocation(program, "aVertexPosition");
+      gl.enableVertexAttribArray(position);
+      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+      gl.viewport(0, 0, scaledWidth, scaledHeight);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteTexture(copyTexture);
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      gl.deleteBuffer(positionBuffer);
+
+      let canvas = document.createElement('canvas');
+      canvas.width = scaledWidth;
+      canvas.height = scaledHeight;
+      let context = canvas.getContext('2d');
+
+      let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
+      context.putImageData(imageData, 0, 0);
+
+      // Передача изображения в TensorFlow.js
+      const imageTensor = tf.browser.fromPixels(canvas);
+      const resizedImage = tf.image.resizeBilinear(imageTensor, [224, 224]);
+      const batchedImage = resizedImage.expandDims(0);
+
+      // Предсказание
+      const predictions = await model.predict(batchedImage);
+      const predictionImage = predictions.squeeze().arraySync(); // Получение результата в виде массива
+
+      // Отображение предсказанного изображения
+      const predictionCanvas = document.getElementById('predictionCanvas');
+      predictionCanvas.width = 224;
+      predictionCanvas.height = 224;
+      const predictionContext = predictionCanvas.getContext('2d');
+
+      const imageDataArray = new Uint8ClampedArray(predictionImage.flat());
+      const predictionImageData = new ImageData(imageDataArray, 224, 224);
+      predictionContext.putImageData(predictionImageData, 0, 0);
+
+      predictionCanvas.style.display = 'block'; // Показываем canvas с изображением
     }
-
-    function displayPrediction(predArray) {
-      // Преобразование массива предсказаний в изображение
-      const height = 224;
-      const width = 224;
-      const imageData = new ImageData(new Uint8ClampedArray(predArray.flat()), width, height);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.putImageData(imageData, 0, 0);
-
-      const imgElement = document.getElementById('predictedImage');
-      imgElement.src = canvas.toDataURL();
-      imgElement.style.display = 'block';
-    }
-    document.getElementById('info').innerText = "TAP";
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
-    document.getElementById('captureButton').addEventListener('click', () => {
-      captureNext = true;
-    });
+    document.getElementById('captureButton').addEventListener('click', () => { captureNext = true; });
   </script>
 </body>
 </html>
