@@ -270,7 +270,7 @@
       
       try {
         const predictions = await model.predict(inputTensor);
-        const unetMask = predictions[0];
+        const unetMask = predictions;
         const unetMaskArray = unetMask.dataSync();
 
         const resultCanvas = document.createElement('canvas');
