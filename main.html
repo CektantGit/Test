@@ -201,23 +201,22 @@
           return;
         }
 
-        const vertexShaderSource = 
+        const vertexShaderSource = `
           attribute vec4 aVertexPosition;
           varying vec2 vTexCoord;
           void main(void) {
             gl_Position = aVertexPosition;
             vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
           }
-        ;
-
-        const fragmentShaderSource = 
+        `;
+        const fragmentShaderSource = `
           precision mediump float;
           varying vec2 vTexCoord;
           uniform sampler2D uSampler;
           void main(void) {
             gl_FragColor = texture2D(uSampler, vTexCoord);
           }
-        ;
+        `;
 
         const vertexShader = gl.createShader(gl.VERTEX_SHADER);
         gl.shaderSource(vertexShader, vertexShaderSource);
@@ -286,7 +285,6 @@
         link.click();
 
         updateInfo(`Image captured and saved as captured-image-${captureIndex}.png`);
-
       } catch (error) {
         updateInfo(`Image capture failed: ${error.message}`);
       }
