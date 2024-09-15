@@ -234,6 +234,16 @@
         // Вывод предсказанного изображения на страницу
         const resultImage = document.createElement('img');
         resultImage.src = maskCanvas.toDataURL();
+        // Сохранение изображения на диск
+maskCanvas.toBlob((blob) => {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'predicted_mask.png'; // Имя файла для сохранения
+  link.click();
+}, 'image/png');
+
+        
+        
         document.body.appendChild(resultImage);
 
       } catch (error) {
