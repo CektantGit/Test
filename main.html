@@ -188,6 +188,7 @@
     }
 
     async function captureImage(frame, camera) {
+      document.getElementById('info').innerText = 'Start';
       const width = camera.width;
       const height = camera.height;
 
@@ -202,7 +203,7 @@
       ctx.drawImage(texture, 0, 0, width, height);
 
       const imageData = ctx.getImageData(0, 0, width, height);
-
+      document.getElementById('info').innerText = 'POST';
       processImageWithModel(imageData);
     }
 
