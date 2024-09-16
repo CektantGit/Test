@@ -176,18 +176,17 @@ function initWebGLResources(gl) {
   // Создание шейдеров
   const vertexShaderSource = `
     attribute vec4 aVertexPosition;
-    attribute vec2 aTextureCoord;
     varying vec2 vTexCoord;
     void main(void) {
       gl_Position = aVertexPosition;
-      vTexCoord = aTextureCoord;
+      vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
     }
   `;
 
   const fragmentShaderSource = `
     precision mediump float;
     varying vec2 vTexCoord;
-    uniform samplerExternalOES uSampler;
+    uniform sampler2D uSampler;
     void main(void) {
       gl_FragColor = texture2D(uSampler, vTexCoord);
     }
@@ -208,19 +207,13 @@ function initWebGLResources(gl) {
   gl.linkProgram(program);
 
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Unable to initialize the shader program: ' + gl.getProgramInfoLog(program);
     return null;
   }
 
   // Создание текстуры и фреймбуфера
   const copyTexture = gl.createTexture();
   const framebuffer = gl.createFramebuffer();
-
-  // Инициализация текстуры как TEXTURE_EXTERNAL_OES
-  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 
   return { program, copyTexture, framebuffer };
 }
@@ -230,13 +223,14 @@ async function captureImage(gl, glBinding, dcamera, resources) {
 
   // Получаем текстуру с камеры
   const texture = glBinding.getCameraImage(dcamera);
+  const width = dcamera.width;
+  const height = dcamera.height;
+
   if (!texture) {
-    console.error('Failed to get camera texture');
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Failed to get camera texture';
     return;
   }
 
-  const width = dcamera.width;
-  const height = dcamera.height;
   const scale = 1;
   const scaledWidth = Math.floor(width * scale);
   const scaledHeight = Math.floor(height * scale);
@@ -246,62 +240,45 @@ async function captureImage(gl, glBinding, dcamera, resources) {
   readbackPixels.fill(0);
 
   // Настройка текстуры для рендеринга
-  const ext = gl.getExtension('OES_texture_external');
-  if (!ext) {
-    console.error('OES_texture_external extension not supported.');
-    return;
-  }
-  
-  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.bindTexture(gl.TEXTURE_2D, copyTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
   // Настройка фреймбуфера
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, copyTexture, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
 
-  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-  if (status !== gl.FRAMEBUFFER_COMPLETE) {
-    console.error('Framebuffer incomplete: ' + status);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Framebuffer incomplete!';
     return;
   }
 
   gl.useProgram(program);
   gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, texture);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.uniform1i(gl.getUniformLocation(program, "uSampler"), 0);
 
   // Настройка вершин для рендеринга
   const vertices = new Float32Array([
-    -1.0, -1.0, 0.0, 0.0,
-    1.0, -1.0, 1.0, 0.0,
-    -1.0, 1.0, 0.0, 1.0,
-    1.0, 1.0, 1.0, 1.0,
+    -1.0, -1.0,
+    1.0, -1.0,
+    -1.0, 1.0,
+    1.0, 1.0,
   ]);
 
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
   const position = gl.getAttribLocation(program, "aVertexPosition");
   gl.enableVertexAttribArray(position);
-  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 16, 0);
-
-  const texCoord = gl.getAttribLocation(program, "aTextureCoord");
-  gl.enableVertexAttribArray(texCoord);
-  gl.vertexAttribPointer(texCoord, 2, gl.FLOAT, false, 16, 8);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
   gl.viewport(0, 0, scaledWidth, scaledHeight);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
   gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
-  if (readbackPixels.length === 0) {
-    console.error('Failed to read pixels');
-    return;
-  }
+  // Освобождение ресурсов
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteBuffer(positionBuffer);
 
   let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
@@ -333,18 +310,17 @@ async function captureImage(gl, glBinding, dcamera, resources) {
   const batchedImgTensor = resizedImgTensor.expandDims();
 
   try {
-    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ':' + new Date().getMilliseconds();
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Start model prediction';
     const predictions = await model.predict(batchedImgTensor);
-    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ':' + new Date().getMilliseconds();
-    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString();
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Model prediction completed';
 
     console.log("Model predictions:", predictions);
-    document.getElementById('info').innerText += "Start convert predict";
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Start convert predict';
     
     // Обработка и отображение предсказаний
     const unetMask = predictions;
     const unetMaskArray = unetMask.dataSync();
-    document.getElementById('info').innerText += "datasync";
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Datasync completed';
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = 224;
     maskCanvas.height = 224;
@@ -369,10 +345,10 @@ async function captureImage(gl, glBinding, dcamera, resources) {
     document.querySelector('.overlay').style.display = 'block';
 
   } catch (error) {
-    console.error('Error during model prediction:', error);
-    document.getElementById('info').innerText += "\nError during model prediction: " + error.message;
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ': Error during model prediction: ' + error.message;
   }
 }
+
 
 
 
