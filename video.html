@@ -76,7 +76,7 @@
 
             // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
             cameraCtx.putImageData(maskImageData, 0, 0);
-            cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
+           // cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
             cameraCtx.drawImage(maskImageData, 0, 0, 512, 512);
 
             requestAnimationFrame(processVideoFrame); // Повторяем обработку
