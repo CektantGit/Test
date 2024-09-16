@@ -113,16 +113,12 @@
                         }
                     }
 
-                    // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
-                    const scaledMask = tf.image.resizeBilinear(tf.tensor(maskImageData.data, [224, 224, 4]), [512, 512]);
-                    const maskArray = await scaledMask.data();
-
-                    const finalImageData = cameraCtx.createImageData(512, 512);
-                    for (let i = 0; i < finalImageData.data.length; i++) {
-                        finalImageData.data[i] = maskArray[i];
-                    }
-
-                    cameraCtx.putImageData(finalImageData, 0, 0);
+                                // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
+            cameraCtx.putImageData(maskImageData, 0, 0);
+           // cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
+            //cameraCtx.drawImage(maskImageData, 0, 0, 512, 512);
+*/
+            requestAnimationFrame(processVideoFrame); // Повторяем обработку
                 }
             } catch (error) {
                 showError("Ошибка в процессе обработки кадров: " + error.message);
