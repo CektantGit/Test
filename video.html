@@ -57,7 +57,7 @@
             const predictions = await model.predict(imageTensor);
 
             // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
-            const unetMask = predictions[0];
+            const unetMask = predictions;
             const unetMaskArray = unetMask.dataSync();
 
             // Создание изображения для маски
