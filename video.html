@@ -38,8 +38,12 @@
 
         // Инициализация камеры
         async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
+const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+        facingMode: { exact: "environment" } // Выбор задней камеры
+    }
+});
+video.srcObject = stream;
 
             video.addEventListener('loadeddata', () => {
                 outputCanvas.width = video.videoWidth;
@@ -61,12 +65,12 @@
             let tensor = tf.browser.fromPixels(imageData)
                 .resizeBilinear([224, 224])  // Меняем размер для модели
                 .expandDims(0)  // Добавляем размерность для батча
-                .toFloat()
                 .div(255);  // Нормализуем пиксели
 
             // Прогоняем кадр через модель
             model.predict(tensor).then(prediction => {
-                let mask = prediction.squeeze().mul(255).clipByValue(0, 255).toInt();
+                
+                let mask = await model.predict(imageTensor);
                 renderMask(mask);
             });
 
