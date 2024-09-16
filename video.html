@@ -53,9 +53,9 @@
                                         .div(255.0)
                                         .expandDims();
 
-            // Прогоняем через модель
+/*            // Прогоняем через модель
             const predictions = await model.predict(imageTensor);
-/*
+
             // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
             const unetMask = predictions;
             const unetMaskArray = unetMask.dataSync();
