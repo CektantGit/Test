@@ -5,37 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Real-time Camera and TensorFlow.js</title>
     <style>
-        #camera, #outputCanvas, #predictionCanvas {
+        #cameraCanvas {
             position: absolute;
             top: 0;
             left: 0;
         }
-        #results {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-size: 18px;
-        }
     </style>
 </head>
 <body>
-    <video id="camera" autoplay playsinline></video>
-    <canvas id="outputCanvas" width="512" height="512"></canvas>
-    <canvas id="predictionCanvas" width="224" height="224"></canvas>
-
-    <div id="results">
-        <p id="position-result">Position: </p>
-        <p id="orientation-result">Orientation: </p>
-    </div>
+    <canvas id="cameraCanvas" width="512" height="512"></canvas>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script>
-        let video = document.getElementById('camera');
-        let outputCanvas = document.getElementById('outputCanvas');
-        let predictionCanvas = document.getElementById('predictionCanvas');
-        let outputCtx = outputCanvas.getContext('2d');
-        let predictionCtx = predictionCanvas.getContext('2d');
+        let video;
+        let cameraCanvas = document.getElementById('cameraCanvas');
+        let cameraCtx = cameraCanvas.getContext('2d');
 
         let model;
 
@@ -47,10 +31,12 @@
 
         // Инициализация камеры
         async function setupCamera() {
+            video = document.createElement('video');
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: { exact: "environment" } }
             });
             video.srcObject = stream;
+            video.play();
             video.addEventListener('loadeddata', () => {
                 processVideoFrame(); // Начинаем обработку
             });
@@ -58,10 +44,11 @@
 
         // Обработка каждого кадра с камеры
         async function processVideoFrame() {
-            outputCtx.drawImage(video, 0, 0, outputCanvas.width, outputCanvas.height);
+            // Отображаем изображение с камеры
+            cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
             // Преобразование изображения в тензор
-            let imageTensor = tf.browser.fromPixels(outputCanvas, 1)
+            let imageTensor = tf.browser.fromPixels(cameraCanvas, 1)
                                         .resizeBilinear([224, 224])
                                         .div(255.0)
                                         .expandDims();
@@ -72,17 +59,29 @@
             // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
             const unetMask = predictions[0];
             const unetMaskArray = unetMask.dataSync();
-            const imageData = predictionCtx.createImageData(224, 224);
 
-            for (let i = 0; i < 224 * 224; i++) {
-                const value = unetMaskArray[i] * 255;  // Масштабируем значения к [0, 255]
-                imageData.data[i * 4] = value;         // R
-                imageData.data[i * 4 + 1] = value;     // G
-                imageData.data[i * 4 + 2] = value;     // B
-                imageData.data[i * 4 + 3] = 255;       // A (прозрачность)
+            // Создание изображения для маски
+            const maskImageData = cameraCtx.createImageData(cameraCanvas.width, cameraCanvas.height);
+
+            // Масштабируем маску до размера холста
+            const scale = cameraCanvas.width / 224;
+            for (let y = 0; y < 224; y++) {
+                for (let x = 0; x < 224; x++) {
+                    const value = unetMaskArray[y * 224 + x] * 255;  // Масштабируем значения к [0, 255]
+                    const destX = Math.floor(x * scale);
+                    const destY = Math.floor(y * scale);
+
+                    // Корректное позиционирование пикселей
+                    const index = (destY * cameraCanvas.width + destX) * 4;
+                    maskImageData.data[index + 0] = 255;       // R
+                    maskImageData.data[index + 1] = 0;         // G
+                    maskImageData.data[index + 2] = 0;         // B
+                    maskImageData.data[index + 3] = value * 0.5; // A (полупрозрачность)
+                }
             }
 
-            predictionCtx.putImageData(imageData, 0, 0);
+            // Накладываем маску на изображение с камеры
+            cameraCtx.putImageData(maskImageData, 0, 0);
 
             requestAnimationFrame(processVideoFrame); // Повторяем обработку
         }
