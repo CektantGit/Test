@@ -22,10 +22,11 @@
 <body>
   <button id="startARBtn">Start AR</button>
   <button id="captureButton">Capture Image</button>
-  <div class="overlay" style="display: none;">
-    <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
-    <button class="button" id="showInfoBtn">Show Info</button>
-  </div>
+<div class="overlay" style="position: relative; display: none;">
+  <img id="maskImage" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;" />
+  <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
+  <button class="button" id="showInfoBtn">Show Info</button>
+</div>
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
@@ -90,6 +91,7 @@
 
         const pose = frame.getViewerPose(referenceSpace);
         if (pose) {
+          
           const view = pose.views[0];
 
           const viewport = session.renderState.baseLayer.getViewport(view);
@@ -109,9 +111,10 @@
 
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
+            captureImage(gl, glBinding, view.camera);
             if (captureNext && view.camera) {
               captureNext = false;  // Останавливаем захват после кадра
-              captureImage(gl, glBinding, view.camera);
+              
             }
           }
 
@@ -323,13 +326,13 @@ context.rotate(Math.PI);
 context.translate(-scaledWidth / 2, -scaledHeight / 2);
 
 */
-// Сохранение изображения
+/*// Сохранение изображения
 canvas.toBlob((blob) => {
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = 'captured_image_rotated.png';
   link.click();
-}, 'image/png');
+}, 'image/png');*/
       
 
       // Преобразование изображения в формат, подходящий для нейросети
@@ -365,19 +368,24 @@ canvas.toBlob((blob) => {
         maskCtx.putImageData(maskImageData, 0, 0);
 
         // Вывод предсказанного изображения на страницу
-        const resultImage = document.createElement('img');
-        resultImage.src = maskCanvas.toDataURL();
+        //const resultImage = document.createElement('img');
+        //resultImage.src = maskCanvas.toDataURL();
         // Сохранение изображения на диск
-maskCanvas.toBlob((blob) => {
+/*maskCanvas.toBlob((blob) => {
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = 'predicted_mask.png'; // Имя файла для сохранения
   link.click();
-}, 'image/png');
+}, 'image/png');*/
 
+        // Сохранение изображения в формате base64 и установка его в элемент
+      const maskImageElement = document.getElementById('maskImage');
+      maskImageElement.src = maskCanvas.toDataURL('image/png');
+
+      // Показ overlay
+      document.querySelector('.overlay').style.display = 'block';
         
-        
-        document.body.appendChild(resultImage);
+       // document.body.appendChild(resultImage);
 
       } catch (error) {
         console.error('Error during model prediction:', error);
