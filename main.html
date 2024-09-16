@@ -343,7 +343,13 @@ canvas.toBlob((blob) => {
       
 
       try {
+        document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString();
+
         const predictions = await model.predict(batchedImgTensor);
+        document.getElementById('info').innerText += '\n' + 'end';
+
+        document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString();
+
         console.log("Model predictions:", predictions);
        // document.getElementById('info').innerText += "\nModel predictions: " + JSON.stringify(predictions);
          document.getElementById('info').innerText  += "Start convert predict"
