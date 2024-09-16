@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera and TensorFlow.js Example</title>
+    <style>
+        #camera, #outputCanvas, #predictionCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
+</head>
+<body>
+    <video id="camera" autoplay playsinline></video>
+    <canvas id="outputCanvas"></canvas>
+    <canvas id="predictionCanvas"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script>
+        let video = document.getElementById('camera');
+        let outputCanvas = document.getElementById('outputCanvas');
+        let predictionCanvas = document.getElementById('predictionCanvas');
+        let outputCtx = outputCanvas.getContext('2d');
+        let predictionCtx = predictionCanvas.getContext('2d');
+
+        let model;
+
+        // Загрузка модели из папки jsModel
+        async function loadModel() {
+            model = await tf.loadLayersModel('./jsModel/model.json');
+            console.log("Model loaded");
+        }
+
+        // Инициализация камеры
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+
+            video.addEventListener('loadeddata', () => {
+                outputCanvas.width = video.videoWidth;
+                outputCanvas.height = video.videoHeight;
+                predictionCanvas.width = video.videoWidth;
+                predictionCanvas.height = video.videoHeight;
+                processVideoFrame();
+            });
+        }
+
+        // Обработка кадра видео
+        function processVideoFrame() {
+            outputCtx.drawImage(video, 0, 0, outputCanvas.width, outputCanvas.height);
+            
+            let imageData = outputCtx.getImageData(0, 0, outputCanvas.width, outputCanvas.height);
+            let tensor = tf.browser.fromPixels(imageData).resizeBilinear([224, 224]).expandDims(0).toFloat().div(255);
+
+            // Прогон через модель
+            model.predict(tensor).then(prediction => {
+                let mask = prediction.squeeze().mul(255).clipByValue(0, 255).toInt();
+                renderMask(mask);
+            });
+
+            requestAnimationFrame(processVideoFrame); // Обновление на каждом кадре
+        }
+
+        // Отображение предсказанной маски
+        function renderMask(maskTensor) {
+            tf.browser.toPixels(maskTensor, predictionCanvas).then(() => {
+                // Наложение одного изображения на другое
+                predictionCtx.globalAlpha = 0.5; // Полупрозрачность маски
+                predictionCtx.drawImage(predictionCanvas, 0, 0, predictionCanvas.width, predictionCanvas.height);
+            });
+        }
+
+        // Инициализация
+        loadModel().then(setupCamera);
+    </script>
+</body>
+</html>
