@@ -80,27 +80,49 @@
                     cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
                     // Преобразование изображения в тензор
-                    tf.tidy(() => {
-                        let imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
-                                                    .resizeBilinear([224, 224])
-                                                    .div(255.0)
-                                                    .expandDims();
+                    const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
+                                                   .resizeBilinear([224, 224])
+                                                   .div(255.0)
+                                                   .expandDims();
 
-                        // Замер времени предсказания
-                        const startTime = performance.now();
+                    // Замер времени предсказания
+                    const startTime = performance.now();
 
-                        // Прогоняем через модель
-                        const predictions = model.predict(imageTensor);
+                    // Прогоняем через модель
+                    const predictions = model.predict(imageTensor);
 
-                        // Замер времени завершения предсказания
-                        const endTime = performance.now();
-                        const predictionTime = endTime - startTime;
-                        timeElement.textContent = predictionTime.toFixed(2);
+                    // Замер времени завершения предсказания
+                    const endTime = performance.now();
+                    const predictionTime = endTime - startTime;
+                    timeElement.textContent = predictionTime.toFixed(2);
 
-                        // Здесь можно продолжить обработку маски
-                        // Например, получение данных предсказания:
-                        // const unetMaskArray = predictions.dataSync();
-                    });
+                    // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
+                    const unetMaskArray = predictions.dataSync();
+
+                    // Создание изображения для маски
+                    const maskImageData = cameraCtx.createImageData(224, 224);
+
+                    for (let y = 0; y < 224; y++) {
+                        for (let x = 0; x < 224; x++) {
+                            const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
+                            const index = (y * 224 + x) * 4;
+                            maskImageData.data[index + 0] = value;       // R
+                            maskImageData.data[index + 1] = value;       // G
+                            maskImageData.data[index + 2] = value;       // B
+                            maskImageData.data[index + 3] = 100;         // A (прозрачность маски)
+                        }
+                    }
+
+                    // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
+                    const scaledMask = tf.image.resizeBilinear(tf.tensor(maskImageData.data, [224, 224, 4]), [512, 512]);
+                    const maskArray = await scaledMask.data();
+
+                    const finalImageData = cameraCtx.createImageData(512, 512);
+                    for (let i = 0; i < finalImageData.data.length; i++) {
+                        finalImageData.data[i] = maskArray[i];
+                    }
+
+                    cameraCtx.putImageData(finalImageData, 0, 0);
                 }
             } catch (error) {
                 showError("Ошибка в процессе обработки кадров: " + error.message);
