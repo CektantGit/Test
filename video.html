@@ -61,27 +61,23 @@
             const unetMaskArray = unetMask.dataSync();
 
             // Создание изображения для маски
-            const maskImageData = cameraCtx.createImageData(cameraCanvas.width, cameraCanvas.height);
+            const maskImageData = cameraCtx.createImageData(224, 224);
 
-            // Масштабирование маски до размера холста
-            const scale = cameraCanvas.width / 224; // или cameraCanvas.height / 224, если соотношение сторон одинаковое
             for (let y = 0; y < 224; y++) {
                 for (let x = 0; x < 224; x++) {
                     const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
-                    //const destX = Math.floor(x * scale);
-                    //const destY = Math.floor(y * scale);
-
-                    // Корректное позиционирование пикселей
-                    const index = (y * cameraCanvas.width + x) * 4;
+                    const index = (y * 224 + x) * 4;
                     maskImageData.data[index + 0] = value;       // R
-                    maskImageData.data[index + 1] = value;         // G
-                    maskImageData.data[index + 2] = value;         // B
-                    maskImageData.data[index + 3] = 255-value; // A (полупрозрачность)
+                    maskImageData.data[index + 1] = value;       // G
+                    maskImageData.data[index + 2] = value;       // B
+                    maskImageData.data[index + 3] = 100;         // A (прозрачность маски)
                 }
             }
 
-            // Накладываем маску на изображение с камеры
+            // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
             cameraCtx.putImageData(maskImageData, 0, 0);
+            cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
+            cameraCtx.drawImage(maskImageData, 0, 0, 512, 512);
 
             requestAnimationFrame(processVideoFrame); // Повторяем обработку
         }
