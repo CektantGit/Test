@@ -285,7 +285,7 @@ gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readba
   gl.deleteShader(fragmentShader);
   gl.deleteBuffer(positionBuffer);
 
-let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
+/*let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
 // Переворот изображения на 180 градусов
 for (let y = 0; y < scaledHeight; y++) {
@@ -299,11 +299,27 @@ for (let y = 0; y < scaledHeight; y++) {
     flippedPixels[destIndex + 2] = readbackPixels[srcIndex + 2]; // B
     flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3]; // A
   }
-}
+}*/
+
+
+// Создание canvas для сохранения изображения
+let canvas = document.createElement('canvas');
+canvas.width = scaledWidth;
+canvas.height = scaledHeight;
+let context = canvas.getContext('2d');
 
 // Создание нового ImageData с перевёрнутыми пикселями
 let imageData = new ImageData(flippedPixels, scaledWidth, scaledHeight);
 context.putImageData(imageData, 0, 0);
+
+  // Перемещение центра координат в центр изображения
+context.translate(scaledWidth / 2, scaledHeight / 2);
+
+// Поворот изображения на 180 градусов
+context.rotate(Math.PI);
+
+// Возвращение системы координат на исходное место
+context.translate(-scaledWidth / 2, -scaledHeight / 2);
 
 // Сохранение изображения
 canvas.toBlob((blob) => {
@@ -312,7 +328,6 @@ canvas.toBlob((blob) => {
   link.download = 'captured_image_rotated.png';
   link.click();
 }, 'image/png');
-      
 
       // Преобразование изображения в формат, подходящий для нейросети
       const imgTensor = tf.browser.fromPixels(canvas, 3);
