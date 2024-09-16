@@ -63,22 +63,14 @@
             // Создание изображения для маски
             const maskImageData = cameraCtx.createImageData(cameraCanvas.width, cameraCanvas.height);
 
-            // Масштабируем маску до размера холста
-            const scale = cameraCanvas.width / 224;
-            for (let y = 0; y < 224; y++) {
-                for (let x = 0; x < 224; x++) {
-                    const value = unetMaskArray[y * 224 + x] * 255;  // Масштабируем значения к [0, 255]
-                    const destX = Math.floor(x * scale);
-                    const destY = Math.floor(y * scale);
+                    for (let i = 0; i < 256 * 256; i++) {
+            const value = unetMaskArray[i] * 255;  // Приведение значений к диапазону [0, 255]
+            maskImageData.data[i * 4] = 0;        // R
+            maskImageData.data[i * 4 + 1] = 0;    // G
+            maskImageData.data[i * 4 + 2] = 0;    // B
+            maskImageData.data[i * 4 + 3] = 255-value; // A (альфа-канал)
+        }
 
-                    // Корректное позиционирование пикселей
-                    const index = (destY * cameraCanvas.width + destX) * 4;
-                    maskImageData.data[index + 0] = 255;       // R
-                    maskImageData.data[index + 1] = 0;         // G
-                    maskImageData.data[index + 2] = 0;         // B
-                    maskImageData.data[index + 3] = value * 0.5; // A (полупрозрачность)
-                }
-            }
 
             // Накладываем маску на изображение с камеры
             cameraCtx.putImageData(maskImageData, 0, 0);
