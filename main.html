@@ -41,7 +41,8 @@
     let captureNext = false;
     const captures = [];
     let model;
-
+    const resources = initWebGLResources(gl);
+    
     async function loadModel() {
       try {
         model = await tf.loadLayersModel('jsModel/model.json');
@@ -117,7 +118,7 @@
 
           const flowerInScene = scene.children.find(child => child.name === 'sunflower');
           if (flowerInScene) {
-            captureImage(gl, glBinding, view.camera);
+            captureImage(gl, glBinding, view.camera,resources);
             if (captureNext && view.camera) {
               captureNext = false;  // Останавливаем захват после кадра
               
@@ -170,22 +171,9 @@
       }
     }
 
-// Создаем текстуру и фреймбуфер один раз
-let copyTexture, framebuffer, program, positionBuffer;
-
-function initializeWebGLResources(gl) {
-  // Создаем текстуру
-  copyTexture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, copyTexture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-  // Создаем фреймбуфер
-  framebuffer = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
-
-  // Компилируем шейдеры и создаем программу
+// Инициализация WebGL и ресурсов
+function initWebGLResources(gl) {
+  // Создание шейдеров
   const vertexShaderSource = `
     attribute vec4 aVertexPosition;
     varying vec2 vTexCoord;
@@ -204,6 +192,7 @@ function initializeWebGLResources(gl) {
     }
   `;
 
+  // Компиляция шейдеров
   const vertexShader = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vertexShader, vertexShaderSource);
   gl.compileShader(vertexShader);
@@ -212,44 +201,49 @@ function initializeWebGLResources(gl) {
   gl.shaderSource(fragmentShader, fragmentShaderSource);
   gl.compileShader(fragmentShader);
 
-  program = gl.createProgram();
+  const program = gl.createProgram();
   gl.attachShader(program, vertexShader);
   gl.attachShader(program, fragmentShader);
   gl.linkProgram(program);
 
-  const vertices = new Float32Array([
-    -1.0, -1.0,
-    1.0, -1.0,
-    -1.0, 1.0,
-    1.0, 1.0,
-  ]);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+    return null;
+  }
 
-  positionBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  // Создание текстуры и фреймбуфера
+  const copyTexture = gl.createTexture();
+  const framebuffer = gl.createFramebuffer();
+
+  return { program, copyTexture, framebuffer };
 }
 
-// Функция для захвата и обработки изображения
-async function captureImage(gl, glBinding, dcamera) {
+async function captureImage(gl, glBinding, dcamera, resources) {
+  const { program, copyTexture, framebuffer } = resources;
+
+  // Получаем текстуру с камеры
   const texture = glBinding.getCameraImage(dcamera);
   const width = dcamera.width;
   const height = dcamera.height;
-  const scale = 1;
-  const scaledWidth = Math.floor(width * scale);
-  const scaledHeight = Math.floor(height * scale);
-  const textureBytes = scaledWidth * scaledHeight * 4;
-
-  // Переиспользуемый буфер для пикселей
-  const readbackPixels = new Uint8Array(textureBytes);
 
   if (!texture) {
     console.error('Failed to get camera texture');
     return;
   }
 
+  const scale = 1;
+  const scaledWidth = Math.floor(width * scale);
+  const scaledHeight = Math.floor(height * scale);
+  const textureBytes = scaledWidth * scaledHeight * 4;
+
+  let readbackPixels = new Uint8Array(textureBytes);
+  readbackPixels.fill(0);
+
+  // Настройка текстуры для рендеринга
   gl.bindTexture(gl.TEXTURE_2D, copyTexture);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  
+
+  // Настройка фреймбуфера
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
 
@@ -258,66 +252,76 @@ async function captureImage(gl, glBinding, dcamera) {
     return;
   }
 
-  document.getElementById('info').innerText += '\nFramebuffer setup complete';
-
   gl.useProgram(program);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.uniform1i(gl.getUniformLocation(program, "uSampler"), 0);
 
+  // Настройка вершин для рендеринга
+  const vertices = new Float32Array([
+    -1.0, -1.0,
+    1.0, -1.0,
+    -1.0, 1.0,
+    1.0, 1.0,
+  ]);
+
+  const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
   const position = gl.getAttribLocation(program, "aVertexPosition");
   gl.enableVertexAttribArray(position);
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
   gl.viewport(0, 0, scaledWidth, scaledHeight);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-  document.getElementById('info').innerText += '\nRendering complete. Reading pixels...';
-
   gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
-  document.getElementById('info').innerText += '\nPixels read. Processing...';
+  // Освобождение ресурсов
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteBuffer(positionBuffer);
 
-  // Обработка переворота изображения
-  const flippedPixels = new Uint8ClampedArray(readbackPixels.length);
+  let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
+  // Переворот изображения на 180 градусов
   for (let y = 0; y < scaledHeight; y++) {
     for (let x = 0; x < scaledWidth; x++) {
       const srcIndex = (y * scaledWidth + x) * 4;
       const destIndex = ((scaledHeight - 1 - y) * scaledWidth + x) * 4;
 
-      flippedPixels[destIndex] = readbackPixels[srcIndex];
-      flippedPixels[destIndex + 1] = readbackPixels[srcIndex + 1];
-      flippedPixels[destIndex + 2] = readbackPixels[srcIndex + 2];
-      flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3];
+      flippedPixels[destIndex] = readbackPixels[srcIndex];         // R
+      flippedPixels[destIndex + 1] = readbackPixels[srcIndex + 1]; // G
+      flippedPixels[destIndex + 2] = readbackPixels[srcIndex + 2]; // B
+      flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3]; // A
     }
   }
 
-  const canvas = document.createElement('canvas');
+  // Создание canvas для сохранения изображения
+  let canvas = document.createElement('canvas');
   canvas.width = scaledWidth;
   canvas.height = scaledHeight;
-  const context = canvas.getContext('2d');
-  const imageData = new ImageData(flippedPixels, 224, 224);
+  let context = canvas.getContext('2d');
+  let imageData = new ImageData(flippedPixels, scaledWidth, scaledHeight);
   context.putImageData(imageData, 0, 0);
 
-  document.getElementById('info').innerText += '\nImage processed. Preparing for model input...';
-
-  // Преобразование изображения для нейросети
+  // Преобразование изображения в формат, подходящий для нейросети
   const imgTensor = tf.browser.fromPixels(canvas, 3);
   const normalizedImgTensor = imgTensor.div(255.0);
   const resizedImgTensor = tf.image.resizeBilinear(normalizedImgTensor, [224, 224]);
   const batchedImgTensor = resizedImgTensor.expandDims();
 
   try {
-    document.getElementById('info').innerText += '\nModel prediction started...';
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ':' + new Date().getMilliseconds();
     const predictions = await model.predict(batchedImgTensor);
-    document.getElementById('info').innerText += '\nModel prediction complete. Processing results...';
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ':' + new Date().getMilliseconds();
+    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString();
 
     console.log("Model predictions:", predictions);
-
+    document.getElementById('info').innerText += "Start convert predict";
+    
+    // Обработка и отображение предсказаний
     const unetMask = predictions;
     const unetMaskArray = unetMask.dataSync();
+    document.getElementById('info').innerText += "datasync";
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = 224;
     maskCanvas.height = 224;
@@ -326,23 +330,27 @@ async function captureImage(gl, glBinding, dcamera) {
 
     for (let i = 0; i < 224 * 224; i++) {
       const value = unetMaskArray[i] * 255;
-      maskImageData.data[i * 4] = value;
-      maskImageData.data[i * 4 + 1] = value;
-      maskImageData.data[i * 4 + 2] = value;
-      maskImageData.data[i * 4 + 3] = 255;
+      maskImageData.data[i * 4] = value; // R
+      maskImageData.data[i * 4 + 1] = value; // G
+      maskImageData.data[i * 4 + 2] = value; // B
+      maskImageData.data[i * 4 + 3] = 255; // A
     }
 
     maskCtx.putImageData(maskImageData, 0, 0);
+
+    // Сохранение изображения в формате base64 и установка его в элемент
     const maskImageElement = document.getElementById('maskImage');
     maskImageElement.src = maskCanvas.toDataURL('image/png');
+
+    // Показ overlay
     document.querySelector('.overlay').style.display = 'block';
 
-    document.getElementById('info').innerText += '\nMask image displayed.';
   } catch (error) {
     console.error('Error during model prediction:', error);
     document.getElementById('info').innerText += "\nError during model prediction: " + error.message;
   }
 }
+
 
 
 
