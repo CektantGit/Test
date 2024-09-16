@@ -10,136 +10,80 @@
             top: 0;
             left: 0;
         }
-        #info, #error {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            background-color: rgba(0, 0, 0, 0.5);
-            padding: 5px;
-            font-family: Arial, sans-serif;
-        }
-        #error {
-            top: 50px; /* Ошибки будут ниже */
-            color: red; /* Красный цвет для ошибок */
-        }
     </style>
 </head>
 <body>
     <canvas id="cameraCanvas" width="512" height="512"></canvas>
-    <div id="info">Prediction time: <span id="time">0</span> ms</div>
-    <div id="error">No errors</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script>
         let video;
         let cameraCanvas = document.getElementById('cameraCanvas');
         let cameraCtx = cameraCanvas.getContext('2d');
-        let timeElement = document.getElementById('time');
-        let errorElement = document.getElementById('error');
 
         let model;
 
-        // Функция для отображения ошибки
-        function showError(message) {
-            errorElement.textContent = message;
-        }
-
         // Загрузка модели
         async function loadModel() {
-            try {
-                model = await tf.loadLayersModel('./jsModel/model.json');
-                console.log("Модель загружена");
-            } catch (error) {
-                showError("Ошибка загрузки модели: " + error.message);
-            }
+            model = await tf.loadLayersModel('./jsModel/model.json');
+            console.log("Модель загружена");
         }
 
         // Инициализация камеры
         async function setupCamera() {
-            try {
-                video = document.createElement('video');
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { exact: "environment" } }
-                });
-                video.srcObject = stream;
-                video.play();
-                video.addEventListener('loadeddata', () => {
-                    processVideoFrame(); // Начинаем обработку
-                });
-            } catch (error) {
-                showError("Ошибка доступа к камере: " + error.message);
-            }
+            video = document.createElement('video');
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { exact: "environment" } }
+            });
+            video.srcObject = stream;
+            video.play();
+            video.addEventListener('loadeddata', () => {
+                processVideoFrame(); // Начинаем обработку
+            });
         }
 
         // Обработка каждого кадра с камеры
         async function processVideoFrame() {
-            try {
-                if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                    const startTime = performance.now();
+            // Отображаем изображение с камеры
+            cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
-                    // Отображаем изображение с камеры
-                    cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            // Преобразование изображения в тензор
+            let imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
+                                        .resizeBilinear([224, 224])
+                                        .div(255.0)
+                                        .expandDims();
 
-                    // Вставка временной задержки для предотвращения перегрузки
-                    setTimeout(async () => {
-                        try {
-                            // Преобразование изображения в тензор
-                            const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
-                                                       .resizeBilinear([224, 224])
-                                                       .div(255.0)
-                                                       .expandDims();
+            // Прогоняем через модель
+            const predictions = await model.predict(imageTensor);
 
-                            // Прогоняем через модель
-                            const predictions = await model.predict(imageTensor);
+            // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
+            const unetMask = predictions;
+            const unetMaskArray = unetMask.dataSync();
 
-                            // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
-                            const unetMaskArray = predictions.dataSync(); // Преобразование в массив
+            // Создание изображения для маски
+            const maskImageData = cameraCtx.createImageData(224, 224);
 
-                            // Создание изображения для маски
-                            const maskImageData = cameraCtx.createImageData(224, 224);
-
-                            for (let y = 0; y < 224; y++) {
-                                for (let x = 0; x < 224; x++) {
-                                    const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
-                                    const index = (y * 224 + x) * 4;
-                                    maskImageData.data[index + 0] = value;       // R
-                                    maskImageData.data[index + 1] = value;       // G
-                                    maskImageData.data[index + 2] = value;       // B
-                                    maskImageData.data[index + 3] = 100;         // A (прозрачность маски)
-                                }
-                            }
-
-                            // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
-                            cameraCtx.putImageData(maskImageData, 0, 0);
-
-                            // Очистка ресурсов
-                            imageTensor.dispose();
-                            predictions.dispose(); // Очистка ресурсов
-
-                            // Замер времени завершения предсказания
-                            const endTime = performance.now();
-                            const predictionTime = endTime - startTime;
-                            timeElement.textContent = predictionTime.toFixed(2);
-                        } catch (error) {
-                            showError("Ошибка в процессе обработки предсказания: " + error.message);
-                        }
-
-                        // Запускаем следующий кадр
-                        requestAnimationFrame(processVideoFrame);
-                    }, 0); // Маленькая задержка для предотвращения перегрузки
-                } else {
-                    requestAnimationFrame(processVideoFrame);
+            for (let y = 0; y < 224; y++) {
+                for (let x = 0; x < 224; x++) {
+                    const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
+                    const index = (y * 224 + x) * 4;
+                    maskImageData.data[index + 0] = value;       // R
+                    maskImageData.data[index + 1] = value;       // G
+                    maskImageData.data[index + 2] = value;       // B
+                    maskImageData.data[index + 3] = 100;         // A (прозрачность маски)
                 }
-            } catch (error) {
-                showError("Ошибка в процессе обработки кадров: " + error.message);
-                requestAnimationFrame(processVideoFrame); // Повторяем обработку в случае ошибки
             }
+
+            // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
+            cameraCtx.putImageData(maskImageData, 0, 0);
+           // cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
+            //cameraCtx.drawImage(maskImageData, 0, 0, 512, 512);
+
+            requestAnimationFrame(processVideoFrame); // Повторяем обработку
         }
 
         // Инициализация: загрузка модели и установка камеры
-        loadModel();
-        setupCamera();
+        loadModel().then(setupCamera);
     </script>
 </body>
 </html>
