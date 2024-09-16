@@ -283,7 +283,7 @@ async function captureImage(gl, glBinding, dcamera, resources) {
 
   let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
-  // Переворот изображения на 180 градусов
+  /*// Переворот изображения на 180 градусов
   for (let y = 0; y < scaledHeight; y++) {
     for (let x = 0; x < scaledWidth; x++) {
       const srcIndex = (y * scaledWidth + x) * 4;
@@ -295,7 +295,7 @@ async function captureImage(gl, glBinding, dcamera, resources) {
       flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3]; // A
     }
   }
-
+*/
   // Создание canvas для сохранения изображения
   let canvas = document.createElement('canvas');
   canvas.width = scaledWidth;
