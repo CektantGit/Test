@@ -13,7 +13,6 @@
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
     .overlay { position: absolute; bottom: 10px; right: 10px; z-index: 10; }
-    .maskImage { position: absolute; z-index: 9; }
     .button { display: block; margin: 5px 0; padding: 10px; background: rgba(0, 0, 0, 0.5); color: white; border: none; border-radius: 5px; cursor: pointer; }
     .info { position: absolute; bottom: 10px; right: 150px; z-index: 10; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
@@ -24,10 +23,10 @@
   <button id="startARBtn">Start AR</button>
   <button id="captureButton">Capture Image</button>
 <div class="overlay">
-  <button class="button" id="placeFlowerBtn">Place/Move Flower</button>
-  <button class="button" id="showInfoBtn">Show Info</button>
+  <img id="maskImage" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;" />
+  <button class="button" id="placeFlowerBtn" style="position: absolute; bottom: 20px; left: 20px; z-index: 1;">Place/Move Flower</button>
+  <button class="button" id="showInfoBtn" style="position: absolute; bottom: 20px; left: 140px; z-index: 1;">Show Info</button>
 </div>
-  <img id="maskImage"/>
   <div class="info" id="info">Information will be displayed here.</div>
 
   <script>
@@ -210,16 +209,14 @@ async function captureImage(gl, glBinding, dcamera) {
     }
   `;
 
-const fragmentShaderSource = `
-  precision mediump float;
-  varying vec2 vTexCoord;
-  uniform sampler2D uSampler;
-  void main(void) {
-    // Инвертируем координаты Y для переворота изображения
-    vec2 flippedTexCoord = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
-    gl_FragColor = texture2D(uSampler, flippedTexCoord);
-  }
-`;
+  const fragmentShaderSource = `
+    precision mediump float;
+    varying vec2 vTexCoord;
+    uniform sampler2D uSampler;
+    void main(void) {
+      gl_FragColor = texture2D(uSampler, vTexCoord);
+    }
+  `;
 
   // Компиляция шейдеров
   const vertexShader = gl.createShader(gl.VERTEX_SHADER);
@@ -291,7 +288,7 @@ gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readba
   gl.deleteShader(fragmentShader);
   gl.deleteBuffer(positionBuffer);
   
-/*let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
+let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
 // Переворот изображения на 180 градусов
 for (let y = 0; y < scaledHeight; y++) {
@@ -305,7 +302,7 @@ for (let y = 0; y < scaledHeight; y++) {
     flippedPixels[destIndex + 2] = readbackPixels[srcIndex + 2]; // B
     flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3]; // A
   }
-}*/
+}
 
 
   
@@ -316,7 +313,7 @@ canvas.height = scaledHeight;
 let context = canvas.getContext('2d');
 // Создание ImageData из считанных пикселей
 // Создание нового ImageData с перевёрнутыми пикселями
-let imageData = new ImageData(readbackPixels, scaledWidth, scaledHeight);
+let imageData = new ImageData(flippedPixels, scaledWidth, scaledHeight);
 context.putImageData(imageData, 0, 0);
   
 /*// Перемещение центра координат в центр изображения
