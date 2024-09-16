@@ -37,7 +37,7 @@
         let cameraCtx = cameraCanvas.getContext('2d');
         let timeElement = document.getElementById('time');
         let errorElement = document.getElementById('error');
-        
+
         let model;
 
         // Функция для отображения ошибки
@@ -89,7 +89,7 @@
                     const startTime = performance.now();
 
                     // Прогоняем через модель
-                    const predictions = model.predict(imageTensor);
+                    const predictions = await model.predict(imageTensor);
 
                     // Замер времени завершения предсказания
                     const endTime = performance.now();
@@ -97,6 +97,7 @@
                     timeElement.textContent = predictionTime.toFixed(2);
 
                     // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
+                  //  const unetMaskArray = predictions[0];  // Получаем первую (и единственную) маску
                     const unetMaskArray = predictions.dataSync();
 
                     // Создание изображения для маски
@@ -113,12 +114,11 @@
                         }
                     }
 
-                                // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
-            cameraCtx.putImageData(maskImageData, 0, 0);
-           // cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
-            //cameraCtx.drawImage(maskImageData, 0, 0, 512, 512);
+                    // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
+                    cameraCtx.putImageData(maskImageData, 0, 0);
                     
-            requestAnimationFrame(processVideoFrame); // Повторяем обработку
+                    // Очистка ресурсов
+                    imageTensor.dispose();
                 }
             } catch (error) {
                 showError("Ошибка в процессе обработки кадров: " + error.message);
