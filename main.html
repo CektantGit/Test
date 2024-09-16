@@ -230,14 +230,13 @@ async function captureImage(gl, glBinding, dcamera, resources) {
 
   // Получаем текстуру с камеры
   const texture = glBinding.getCameraImage(dcamera);
-  const width = dcamera.width;
-  const height = dcamera.height;
-
   if (!texture) {
     console.error('Failed to get camera texture');
     return;
   }
 
+  const width = dcamera.width;
+  const height = dcamera.height;
   const scale = 1;
   const scaledWidth = Math.floor(width * scale);
   const scaledHeight = Math.floor(height * scale);
@@ -247,14 +246,24 @@ async function captureImage(gl, glBinding, dcamera, resources) {
   readbackPixels.fill(0);
 
   // Настройка текстуры для рендеринга
+  const ext = gl.getExtension('OES_texture_external');
+  if (!ext) {
+    console.error('OES_texture_external extension not supported.');
+    return;
+  }
+  
   gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 
   // Настройка фреймбуфера
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, copyTexture, 0);
 
-  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    console.error("Framebuffer incomplete!");
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('Framebuffer incomplete: ' + status);
     return;
   }
 
@@ -284,13 +293,15 @@ async function captureImage(gl, glBinding, dcamera, resources) {
   gl.vertexAttribPointer(texCoord, 2, gl.FLOAT, false, 16, 8);
 
   gl.viewport(0, 0, scaledWidth, scaledHeight);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
-  // Освобождение ресурсов
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.deleteBuffer(positionBuffer);
+  if (readbackPixels.length === 0) {
+    console.error('Failed to read pixels');
+    return;
+  }
 
   let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
