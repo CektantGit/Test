@@ -3,12 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Camera and TensorFlow.js Example</title>
+    <title>Real-time Camera Processing with TensorFlow.js</title>
     <style>
-        #camera, #outputCanvas, #predictionCanvas {
+        video, canvas {
             position: absolute;
             top: 0;
             left: 0;
+        }
+
+        #predictionCanvas {
+            opacity: 0.5; /* Прозрачность для наложения */
         }
     </style>
 </head>
@@ -24,13 +28,12 @@
         let predictionCanvas = document.getElementById('predictionCanvas');
         let outputCtx = outputCanvas.getContext('2d');
         let predictionCtx = predictionCanvas.getContext('2d');
-
         let model;
 
-        // Загрузка модели из папки jsModel
+        // Загрузка модели
         async function loadModel() {
             model = await tf.loadLayersModel('./jsModel/model.json');
-            console.log("Model loaded");
+            console.log("Модель загружена");
         }
 
         // Инициализация камеры
@@ -43,36 +46,43 @@
                 outputCanvas.height = video.videoHeight;
                 predictionCanvas.width = video.videoWidth;
                 predictionCanvas.height = video.videoHeight;
-                processVideoFrame();
+
+                processVideoFrame(); // Начинаем обработку кадров
             });
         }
 
-        // Обработка кадра видео
+        // Обработка каждого кадра с камеры
         function processVideoFrame() {
+            // Рисуем текущий кадр на холсте
             outputCtx.drawImage(video, 0, 0, outputCanvas.width, outputCanvas.height);
-            
-            let imageData = outputCtx.getImageData(0, 0, outputCanvas.width, outputCanvas.height);
-            let tensor = tf.browser.fromPixels(imageData).resizeBilinear([224, 224]).expandDims(0).toFloat().div(255);
 
-            // Прогон через модель
+            // Получаем изображение с холста и конвертируем в тензор
+            let imageData = outputCtx.getImageData(0, 0, outputCanvas.width, outputCanvas.height);
+            let tensor = tf.browser.fromPixels(imageData)
+                .resizeBilinear([224, 224])  // Меняем размер для модели
+                .expandDims(0)  // Добавляем размерность для батча
+                .toFloat()
+                .div(255);  // Нормализуем пиксели
+
+            // Прогоняем кадр через модель
             model.predict(tensor).then(prediction => {
                 let mask = prediction.squeeze().mul(255).clipByValue(0, 255).toInt();
                 renderMask(mask);
             });
 
-            requestAnimationFrame(processVideoFrame); // Обновление на каждом кадре
+            requestAnimationFrame(processVideoFrame); // Повторяем обработку для следующего кадра
         }
 
-        // Отображение предсказанной маски
+        // Отображение предсказанной маски поверх изображения
         function renderMask(maskTensor) {
+            // Конвертируем маску в пиксели и отображаем на втором холсте
             tf.browser.toPixels(maskTensor, predictionCanvas).then(() => {
-                // Наложение одного изображения на другое
-                predictionCtx.globalAlpha = 0.5; // Полупрозрачность маски
+                predictionCtx.clearRect(0, 0, predictionCanvas.width, predictionCanvas.height);
                 predictionCtx.drawImage(predictionCanvas, 0, 0, predictionCanvas.width, predictionCanvas.height);
             });
         }
 
-        // Инициализация
+        // Инициализация: загрузка модели и установка камеры
         loadModel().then(setupCamera);
     </script>
 </body>
