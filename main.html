@@ -171,23 +171,23 @@
         return;
       }
     }
-
 // Инициализация WebGL и ресурсов
 function initWebGLResources(gl) {
   // Создание шейдеров
   const vertexShaderSource = `
     attribute vec4 aVertexPosition;
+    attribute vec2 aTextureCoord;
     varying vec2 vTexCoord;
     void main(void) {
       gl_Position = aVertexPosition;
-      vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
+      vTexCoord = aTextureCoord;
     }
   `;
 
   const fragmentShaderSource = `
     precision mediump float;
     varying vec2 vTexCoord;
-    uniform sampler2D uSampler;
+    uniform samplerExternalOES uSampler;
     void main(void) {
       gl_FragColor = texture2D(uSampler, vTexCoord);
     }
@@ -216,6 +216,12 @@ function initWebGLResources(gl) {
   const copyTexture = gl.createTexture();
   const framebuffer = gl.createFramebuffer();
 
+  // Инициализация текстуры как TEXTURE_EXTERNAL_OES
+  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
   return { program, copyTexture, framebuffer };
 }
 
@@ -241,12 +247,11 @@ async function captureImage(gl, glBinding, dcamera, resources) {
   readbackPixels.fill(0);
 
   // Настройка текстуры для рендеринга
-  gl.bindTexture(gl.TEXTURE_2D, copyTexture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, scaledWidth, scaledHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
 
   // Настройка фреймбуфера
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, copyTexture, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, copyTexture, 0);
 
   if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
     console.error("Framebuffer incomplete!");
@@ -255,26 +260,32 @@ async function captureImage(gl, glBinding, dcamera, resources) {
 
   gl.useProgram(program);
   gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, texture);
   gl.uniform1i(gl.getUniformLocation(program, "uSampler"), 0);
 
   // Настройка вершин для рендеринга
   const vertices = new Float32Array([
-    -1.0, -1.0,
-    1.0, -1.0,
-    -1.0, 1.0,
-    1.0, 1.0,
+    -1.0, -1.0, 0.0, 0.0,
+    1.0, -1.0, 1.0, 0.0,
+    -1.0, 1.0, 0.0, 1.0,
+    1.0, 1.0, 1.0, 1.0,
   ]);
 
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
   const position = gl.getAttribLocation(program, "aVertexPosition");
   gl.enableVertexAttribArray(position);
-  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 16, 0);
+
+  const texCoord = gl.getAttribLocation(program, "aTextureCoord");
+  gl.enableVertexAttribArray(texCoord);
+  gl.vertexAttribPointer(texCoord, 2, gl.FLOAT, false, 16, 8);
 
   gl.viewport(0, 0, scaledWidth, scaledHeight);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
   gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
   // Освобождение ресурсов
