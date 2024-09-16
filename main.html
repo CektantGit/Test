@@ -285,23 +285,24 @@ gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readba
   gl.deleteShader(fragmentShader);
   gl.deleteBuffer(positionBuffer);
 
-// Создание canvas для сохранения изображения
-let canvas = document.createElement('canvas');
-canvas.width = scaledWidth;
-canvas.height = scaledHeight;
-let context = canvas.getContext('2d');
+let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
-// Перемещение центра координат в центр изображения
-context.translate(scaledWidth / 2, scaledHeight / 2);
+// Переворот изображения на 180 градусов
+for (let y = 0; y < scaledHeight; y++) {
+  for (let x = 0; x < scaledWidth; x++) {
+    const srcIndex = (y * scaledWidth + x) * 4;
+    const destIndex = ((scaledHeight - 1 - y) * scaledWidth + x) * 4;
 
-// Поворот изображения на 180 градусов
-context.rotate(Math.PI);
+    // Копируем RGBA компоненты
+    flippedPixels[destIndex] = readbackPixels[srcIndex];         // R
+    flippedPixels[destIndex + 1] = readbackPixels[srcIndex + 1]; // G
+    flippedPixels[destIndex + 2] = readbackPixels[srcIndex + 2]; // B
+    flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3]; // A
+  }
+}
 
-// Возвращение системы координат на исходное место
-context.translate(-scaledWidth / 2, -scaledHeight / 2);
-
-// Создание ImageData из считанных пикселей
-let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
+// Создание нового ImageData с перевёрнутыми пикселями
+let imageData = new ImageData(flippedPixels, scaledWidth, scaledHeight);
 context.putImageData(imageData, 0, 0);
 
 // Сохранение изображения
