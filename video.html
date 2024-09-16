@@ -75,6 +75,8 @@
         // Обработка каждого кадра с камеры
         async function processVideoFrame() {
             try {
+                                    // Замер времени предсказания
+                    const startTime = performance.now();
                 if (video.readyState === video.HAVE_ENOUGH_DATA) {
                     // Отображаем изображение с камеры
                     cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
@@ -85,16 +87,11 @@
                                                    .div(255.0)
                                                    .expandDims();
 
-                    // Замер времени предсказания
-                    const startTime = performance.now();
+
 
                     // Прогоняем через модель
                     const predictions = await model.predict(imageTensor);
 
-                    // Замер времени завершения предсказания
-                    const endTime = performance.now();
-                    const predictionTime = endTime - startTime;
-                    timeElement.textContent = predictionTime.toFixed(2);
 
                     // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
                   //  const unetMaskArray = predictions[0];  // Получаем первую (и единственную) маску
@@ -123,6 +120,10 @@
             } catch (error) {
                 showError("Ошибка в процессе обработки кадров: " + error.message);
             }
+                                // Замер времени завершения предсказания
+                    const endTime = performance.now();
+                    const predictionTime = endTime - startTime;
+                    timeElement.textContent = predictionTime.toFixed(2);
 
             requestAnimationFrame(processVideoFrame); // Повторяем обработку
         }
