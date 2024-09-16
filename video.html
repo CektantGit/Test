@@ -55,14 +55,14 @@
 
             // Прогоняем через модель
             const predictions = await model.predict(imageTensor);
-
+/*
             // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
             const unetMask = predictions;
             const unetMaskArray = unetMask.dataSync();
 
             // Создание изображения для маски
             const maskImageData = cameraCtx.createImageData(224, 224);
-/*
+
             for (let y = 0; y < 224; y++) {
                 for (let x = 0; x < 224; x++) {
                     const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
