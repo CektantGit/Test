@@ -221,13 +221,27 @@ function getProgram(gl, vertexSource, fragmentSource) {
 
 function initWebGLResources(gl) {
   const program = getProgram(gl, vertexSource, fragmentSource);
-  const copyTexture = gl.createTexture();
-  const framebuffer = gl.createFramebuffer();
+  if (!program) {
+    console.error('Failed to create program');
+    return null;
+  }
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  const copyTexture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  const framebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, copyTexture, 0);
+
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('Framebuffer incomplete: ' + status);
+    return null;
+  }
 
   return { program, copyTexture, framebuffer };
 }
