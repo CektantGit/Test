@@ -284,17 +284,36 @@ gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readba
   gl.deleteShader(vertexShader);
   gl.deleteShader(fragmentShader);
   gl.deleteBuffer(positionBuffer);
+  
+let flippedPixels = new Uint8ClampedArray(readbackPixels.length);
 
+// Переворот изображения на 180 градусов
+for (let y = 0; y < scaledHeight; y++) {
+  for (let x = 0; x < scaledWidth; x++) {
+    const srcIndex = (y * scaledWidth + x) * 4;
+    const destIndex = ((scaledHeight - 1 - y) * scaledWidth + x) * 4;
+
+    // Копируем RGBA компоненты
+    flippedPixels[destIndex] = readbackPixels[srcIndex];         // R
+    flippedPixels[destIndex + 1] = readbackPixels[srcIndex + 1]; // G
+    flippedPixels[destIndex + 2] = readbackPixels[srcIndex + 2]; // B
+    flippedPixels[destIndex + 3] = readbackPixels[srcIndex + 3]; // A
+  }
+}
+
+
+  
 // Создание canvas для сохранения изображения
 let canvas = document.createElement('canvas');
 canvas.width = scaledWidth;
 canvas.height = scaledHeight;
 let context = canvas.getContext('2d');
 // Создание ImageData из считанных пикселей
-let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
+// Создание нового ImageData с перевёрнутыми пикселями
+let imageData = new ImageData(flippedPixels, scaledWidth, scaledHeight);
 context.putImageData(imageData, 0, 0);
   
-// Перемещение центра координат в центр изображения
+/*// Перемещение центра координат в центр изображения
 context.translate(scaledWidth / 2, scaledHeight / 2);
 
 // Поворот изображения на 180 градусов
@@ -303,7 +322,7 @@ context.rotate(Math.PI);
 // Возвращение системы координат на исходное место
 context.translate(-scaledWidth / 2, -scaledHeight / 2);
 
-
+*/
 // Сохранение изображения
 canvas.toBlob((blob) => {
   const link = document.createElement('a');
