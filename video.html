@@ -47,7 +47,7 @@
             // Отображаем изображение с камеры
             cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
-            // Преобразование изображения в тензор
+      /*      // Преобразование изображения в тензор
             let imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
                                         .resizeBilinear([224, 224])
                                         .div(255.0)
@@ -78,7 +78,7 @@
             cameraCtx.putImageData(maskImageData, 0, 0);
            // cameraCtx.globalAlpha = 0.5;  // Устанавливаем прозрачность для маски
             //cameraCtx.drawImage(maskImageData, 0, 0, 512, 512);
-
+*/
             requestAnimationFrame(processVideoFrame); // Повторяем обработку
         }
 
