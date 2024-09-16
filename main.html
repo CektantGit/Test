@@ -263,15 +263,18 @@ async function captureImage(gl, glBinding, dcamera) {
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
   const position = gl.getAttribLocation(program, "aVertexPosition");
-  gl.enableVertexAttribArray(position);
-  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+// Настройка буфера вершин
+gl.enableVertexAttribArray(position);
+gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
-  // Рендеринг на экран
-  gl.viewport(0, 0, scaledWidth, scaledHeight);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+// Устанавливаем viewport на размер текстуры
+gl.viewport(0, 0, scaledWidth, scaledHeight);
 
-  // Чтение пикселей с фреймбуфера
-  gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
+// Рендеринг в текстуру (фреймбуфер)
+gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+// Чтение пикселей с фреймбуфера (без отображения на экране)
+gl.readPixels(0, 0, scaledWidth, scaledHeight, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
 
   // Освобождение ресурсов
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -282,31 +285,37 @@ async function captureImage(gl, glBinding, dcamera) {
   gl.deleteShader(fragmentShader);
   gl.deleteBuffer(positionBuffer);
 
-  // Создание canvas для сохранения изображения
-  let canvas = document.createElement('canvas');
-  canvas.width = scaledWidth;
-  canvas.height = scaledHeight;
-  let context = canvas.getContext('2d');
+// Создание canvas для сохранения изображения
+let canvas = document.createElement('canvas');
+canvas.width = scaledWidth;
+canvas.height = scaledHeight;
+let context = canvas.getContext('2d');
 
-  // Создание ImageData из считанных пикселей
-  let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
-  context.putImageData(imageData, 0, 0);
+// Перемещение центра координат в центр изображения
+context.translate(scaledWidth / 2, scaledHeight / 2);
 
-  // Сохранение изображения напрямую
-  canvas.toBlob((blob) => {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'captured_image.png';
-    link.click();
-  }, 'image/png');
+// Поворот изображения на 180 градусов
+context.rotate(Math.PI);
 
+// Возвращение системы координат на исходное место
+context.translate(-scaledWidth / 2, -scaledHeight / 2);
+
+// Создание ImageData из считанных пикселей
+let imageData = new ImageData(new Uint8ClampedArray(readbackPixels), scaledWidth, scaledHeight);
+context.putImageData(imageData, 0, 0);
+
+// Сохранение изображения
+canvas.toBlob((blob) => {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'captured_image_rotated.png';
+  link.click();
+}, 'image/png');
       
 
       // Преобразование изображения в формат, подходящий для нейросети
       const imgTensor = tf.browser.fromPixels(canvas, 3);
       const normalizedImgTensor =  imgTensor.div(255.0);
-
-      // Преобразование изображения в нужный формат для модели
       const resizedImgTensor = tf.image.resizeBilinear(normalizedImgTensor, [224, 224]); // Изменение размера
       const batchedImgTensor = resizedImgTensor.expandDims();
       
