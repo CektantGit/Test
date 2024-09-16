@@ -41,7 +41,7 @@
     let captureNext = false;
     const captures = [];
     let model;
-    const resources = initWebGLResources(gl);
+    let resources;
     
     async function loadModel() {
       try {
@@ -65,6 +65,7 @@
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
       glBinding = new XRWebGLBinding(session, gl);
+      resources = initWebGLResources(gl);
 
       const referenceSpace = await session.requestReferenceSpace('local');
       const viewerSpace = await session.requestReferenceSpace('viewer');
