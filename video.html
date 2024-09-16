@@ -48,7 +48,7 @@
             cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
             // Преобразование изображения в тензор
-            let imageTensor = tf.browser.fromPixels(cameraCanvas, 1)
+            let imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
                                         .resizeBilinear([224, 224])
                                         .div(255.0)
                                         .expandDims();
@@ -63,7 +63,7 @@
             // Создание изображения для маски
             const maskImageData = cameraCtx.createImageData(cameraCanvas.width, cameraCanvas.height);
 
-                    for (let i = 0; i < 256 * 256; i++) {
+            for (let i = 0; i < 256 * 256; i++) {
             const value = unetMaskArray[i] * 255;  // Приведение значений к диапазону [0, 255]
             maskImageData.data[i * 4] = 0;        // R
             maskImageData.data[i * 4 + 1] = 0;    // G
