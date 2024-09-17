@@ -46,7 +46,7 @@ async function processVideoFrame() {
     cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
     // Преобразование изображения в тензор
-    let imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
+    const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
                                 .resizeBilinear([224, 224])
                                 .div(255.0)
                                 .expandDims();
@@ -79,7 +79,7 @@ async function processVideoFrame() {
     } finally {
         // Явно освобождаем память, чтобы избежать утечек
         imageTensor.dispose();
-        predictions.dispose();
+        //predictions.dispose();
     }
 
     requestAnimationFrame(processVideoFrame); // Повторяем обработку
