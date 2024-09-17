@@ -69,7 +69,7 @@ async function processVideoFrame() {
                 maskImageData.data[index + 0] = value;       // R
                 maskImageData.data[index + 1] = value;       // G
                 maskImageData.data[index + 2] = value;       // B
-                maskImageData.data[index + 3] = 100;         // A (прозрачность маски)
+                maskImageData.data[index + 3] = 255 - value;         // A (прозрачность маски)
             }
         }
 
