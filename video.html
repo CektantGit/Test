@@ -5,21 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Real-time Camera and TensorFlow.js</title>
     <style>
-        #cameraCanvas {
+        #cameraCanvas, #maskCanvas {
             position: absolute;
-            top: 1;
+            top: 0;
             left: 0;
+        }
+
+        #maskCanvas {
+            pointer-events: none; /* Чтобы избежать взаимодействия с верхним холстом */
         }
     </style>
 </head>
 <body>
     <canvas id="cameraCanvas" width="224" height="224"></canvas>
+    <canvas id="maskCanvas" width="224" height="224"></canvas>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script>
         let video;
         let cameraCanvas = document.getElementById('cameraCanvas');
         let cameraCtx = cameraCanvas.getContext('2d');
+
+        let maskCanvas = document.getElementById('maskCanvas');
+        let maskCtx = maskCanvas.getContext('2d');
 
         let model;
 
@@ -41,49 +49,53 @@
                 processVideoFrame(); // Начинаем обработку
             });
         }
-async function processVideoFrame() {
-    // Отображаем изображение с камеры
-    cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
-    // Преобразование изображения в тензор
-    const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
-                                .resizeBilinear([224, 224])
-                                .div(255.0)
-                                .expandDims();
+        async function processVideoFrame() {
+            // Отображаем изображение с камеры на первом холсте
+            cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
 
-    try {
-        // Прогоняем через модель
-        const predictions = await model.predict(imageTensor);
+            // Преобразование изображения в тензор
+            const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
+                                        .resizeBilinear([224, 224])
+                                        .div(255.0)
+                                        .expandDims();
 
-        // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
-        const unetMask = predictions;
-        const unetMaskArray = unetMask.dataSync(); // Внимание: нужно избежать лишнего использования
+            try {
+                // Прогоняем через модель
+                const predictions = await model.predict(imageTensor);
 
-        // Создание изображения для маски
-        const maskImageData = cameraCtx.createImageData(224, 224);
+                // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
+                const unetMask = predictions;
+                const unetMaskArray = unetMask.dataSync(); 
 
-        for (let y = 0; y < 224; y++) {
-            for (let x = 0; x < 224; x++) {
-                const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
-                const index = (y * 224 + x) * 4;
-                maskImageData.data[index + 0] = value;       // R
-                maskImageData.data[index + 1] = value;       // G
-                maskImageData.data[index + 2] = value;       // B
-                maskImageData.data[index + 3] = 255 - value;         // A (прозрачность маски)
+                // Очистка предыдущего кадра маски
+                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+                // Создание изображения для маски
+                const maskImageData = maskCtx.createImageData(224, 224);
+
+                for (let y = 0; y < 224; y++) {
+                    for (let x = 0; x < 224; x++) {
+                        const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
+                        const index = (y * 224 + x) * 4;
+                        maskImageData.data[index + 0] = value;       // R
+                        maskImageData.data[index + 1] = value;       // G
+                        maskImageData.data[index + 2] = value;       // B
+                        maskImageData.data[index + 3] = value * 0.5; // A (прозрачность)
+                    }
+                }
+
+                // Накладываем маску на верхний холст
+                maskCtx.putImageData(maskImageData, 0, 0);
+
+            } finally {
+                // Явно освобождаем память, чтобы избежать утечек
+                imageTensor.dispose();
+                predictions.dispose();
             }
+
+            requestAnimationFrame(processVideoFrame); // Повторяем обработку
         }
-
-        // Масштабируем маску до размеров холста (512x512) и накладываем поверх видео
-        cameraCtx.putImageData(maskImageData, 0, 0);
-        
-    } finally {
-        // Явно освобождаем память, чтобы избежать утечек
-        imageTensor.dispose();
-        //predictions.dispose();
-    }
-
-    requestAnimationFrame(processVideoFrame); // Повторяем обработку
-}
 
         // Инициализация: загрузка модели и установка камеры
         loadModel().then(setupCamera);
