@@ -78,9 +78,9 @@
                     for (let x = 0; x < 224; x++) {
                         const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
                         const index = (y * 224 + x) * 4;
-                        maskImageData.data[index + 0] = value;       // R
-                        maskImageData.data[index + 1] = value;       // G
-                        maskImageData.data[index + 2] = value;       // B
+                        maskImageData.data[index + 0] = 255 - value;       // R
+                        maskImageData.data[index + 1] = 255 - value;       // G
+                        maskImageData.data[index + 2] = 255 - value;       // B
                         maskImageData.data[index + 3] = 255 - value; // A (прозрачность)
                     }
                 }
