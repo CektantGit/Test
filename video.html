@@ -81,7 +81,7 @@
                         maskImageData.data[index + 0] = value;       // R
                         maskImageData.data[index + 1] = value;       // G
                         maskImageData.data[index + 2] = value;       // B
-                        maskImageData.data[index + 3] = value * 0.5; // A (прозрачность)
+                        maskImageData.data[index + 3] = 255 - value; // A (прозрачность)
                     }
                 }
 
@@ -91,7 +91,7 @@
             } finally {
                 // Явно освобождаем память, чтобы избежать утечек
                 imageTensor.dispose();
-                predictions.dispose();
+                //predictions.dispose();
             }
 
             requestAnimationFrame(processVideoFrame); // Повторяем обработку
