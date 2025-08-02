@@ -30,7 +30,6 @@
     let model;
     let isProcessing = false;
     let runAutoLoop = false;
-
     let positionBuffer, position, texCoord;
 
     const fragmentSource = `
@@ -109,9 +108,12 @@
     async function captureImage(gl, glBinding, dcamera, resources) {
       const { program, copyTexture, framebuffer } = resources;
       const texture = glBinding.getCameraImage(dcamera);
-      const width = dcamera.width;
-      const height = dcamera.height;
-      if (!texture) return;
+      if (!texture) {
+        console.warn("Camera texture is null");
+        return;
+      }
+      const width = gl.drawingBufferWidth;
+      const height = gl.drawingBufferHeight;
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, copyTexture, 0);
@@ -156,7 +158,12 @@
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', { xrCompatible: true });
-      session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body }});
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test'],
+        optionalFeatures: ['camera-access', 'dom-overlay'],
+        domOverlay: { root: document.body }
+      });
+      console.log("XR session started");
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       glBinding = new XRWebGLBinding(session, gl);
       resources = initWebGLResources(gl);
@@ -184,8 +191,9 @@
         camera.updateMatrixWorld(true);
 
         if (runAutoLoop && !isProcessing && view.camera) {
+          const dcamera = view.camera;
           isProcessing = true;
-          captureImage(gl, glBinding, view.camera, resources).then(() => {
+          captureImage(gl, glBinding, dcamera, resources).then(() => {
             isProcessing = false;
           });
         }
