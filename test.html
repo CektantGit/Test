@@ -9,12 +9,11 @@
   <script src="https://unpkg.com/three@0.122.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://unpkg.com/three@0.122.0/examples/js/vr/ARButton.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; font-family: monospace; background: black; color: white; }
+    body { margin: 0; overflow: hidden; font-family: monospace; background: white; color: black; }
     canvas { display: block; }
-    #info { position: absolute; top: 0; left: 0; white-space: pre-wrap; font-size: 12px; background: rgba(0,0,0,0.5); padding: 10px; z-index: 20; }
+    #info { position: absolute; top: 0; left: 0; white-space: pre-wrap; font-size: 12px; background: rgba(255,255,255,0.7); padding: 10px; z-index: 20; color: black; }
     #captureButton, #startARBtn {
       position: absolute;
-      top: 10px;
       left: 10px;
       z-index: 15;
       padding: 10px;
@@ -24,6 +23,7 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    #startARBtn { top: 10px; }
     #captureButton { top: 60px; }
     #maskImage {
       position: absolute;
@@ -46,7 +46,7 @@
   <script>
     let model, renderer, camera, scene, gl, session, glBinding;
     let referenceSpace;
-    let capturePending = false;
+    let captureActive = false;
 
     async function loadModel() {
       try {
@@ -76,6 +76,7 @@
 
         session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
         referenceSpace = await session.requestReferenceSpace('local');
+
         glBinding = new XRWebGLBinding(session, gl);
 
         renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
@@ -94,10 +95,7 @@
     async function captureImage(view) {
       try {
         const texture = glBinding.getCameraImage(view.camera);
-        if (!texture) {
-          log("No camera texture");
-          return;
-        }
+        if (!texture) return;
 
         const width = view.camera.width;
         const height = view.camera.height;
@@ -134,7 +132,6 @@
 
         const img = tf.browser.fromPixels(canvas, 3).div(255);
         const resized = tf.image.resizeBilinear(img, [224, 224]).expandDims();
-
         const pred = await model.predict(resized);
         const arr = pred.dataSync();
 
@@ -156,8 +153,6 @@
         document.getElementById('maskImage').src = maskCanvas.toDataURL('image/png');
       } catch (e) {
         log("Capture error: " + e.message);
-      } finally {
-        capturePending = false;
       }
     }
 
@@ -178,17 +173,13 @@
 
       renderer.render(scene, camera);
 
-      if (capturePending) {
+      if (captureActive) {
         captureImage(view);
       }
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
-    document.getElementById('captureButton').addEventListener('click', () => {
-      if (!capturePending) {
-        capturePending = true;
-      }
-    });
+    document.getElementById('captureButton').addEventListener('click', () => captureActive = true);
   </script>
 </body>
 </html>
