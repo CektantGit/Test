@@ -3,34 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR with WebXR</title>
+  <title>AR Capture Only</title>
   <script src="https://unpkg.com/three@0.122.0/build/three.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.7.0/dist/tf.min.js"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-    .overlay2 { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
-    #startARBtn, #captureButton { position: absolute; left: 10px; z-index: 12; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
+    #startARBtn, #captureButton {
+      position: absolute;
+      left: 10px;
+      z-index: 12;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
     #startARBtn { top: 10px; }
     #captureButton { top: 60px; }
-    #maskImage { width: 100%; height: 100%; object-fit: cover; }
+    #maskImage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 10;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <button id="startARBtn">Start AR</button>
   <button id="captureButton">Capture Image</button>
-  <div class="overlay2">
-    <img id="maskImage"/>
-  </div>
+  <img id="maskImage"/>
 
 <script>
-let scene, camera, renderer, session, glBinding, referenceSpace;
-let model, captureRequested = false, resources;
+let scene, camera, renderer, session, glBinding, referenceSpace, model;
+let captureRequested = false;
 
 async function loadModel() {
-  try {
-    model = await tf.loadLayersModel('jsModel/model.json');
-  } catch (e) { console.error("Model load error", e); }
+  model = await tf.loadLayersModel('jsModel/model.json');
+  console.log("✅ Model loaded");
 }
 
 async function activateXR() {
@@ -39,186 +53,99 @@ async function activateXR() {
   const gl = canvas.getContext('webgl', { xrCompatible: true });
 
   session = await navigator.xr.requestSession('immersive-ar', {
-    requiredFeatures: ['hit-test'],
+    requiredFeatures: ['hit-test', 'camera-access'],
     optionalFeatures: ['dom-overlay'],
     domOverlay: { root: document.body }
   });
 
   session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+
   glBinding = new XRWebGLBinding(session, gl);
-
   referenceSpace = await session.requestReferenceSpace('local');
-  const viewerSpace = await session.requestReferenceSpace('viewer');
-  const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-  renderer = new THREE.WebGLRenderer({ canvas, context: gl, alpha: true });
+  renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
   renderer.autoClear = false;
+
   camera = new THREE.PerspectiveCamera();
   camera.matrixAutoUpdate = false;
+
   scene = new THREE.Scene();
 
-  resources = initWebGLResources(gl);
-
-  function onXRFrame(time, frame) {
-    session.requestAnimationFrame(onXRFrame);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
-
-    const pose = frame.getViewerPose(referenceSpace);
-    if (!pose) return;
-
-    const view = pose.views[0];
-    const viewport = session.renderState.baseLayer.getViewport(view);
-    renderer.setSize(viewport.width, viewport.height);
-
-    camera.matrix.fromArray(view.transform.matrix);
-    camera.projectionMatrix.fromArray(view.projectionMatrix);
-    camera.updateMatrixWorld(true);
-
-    if (captureRequested && view.camera) {
-      captureRequested = false;
-      captureImage(gl, glBinding, view.camera, resources);
-    }
-
-    renderer.render(scene, camera);
-  }
-
   session.requestAnimationFrame(onXRFrame);
+
+  document.getElementById('startARBtn').style.display = 'none';
 }
 
-function getShader(gl, source, type) {
-  const shader = gl.createShader(type === 'fragment' ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.error(gl.getShaderInfoLog(shader));
-    gl.deleteShader(shader);
-    return null;
-  }
-  return shader;
-}
+async function captureFrame(view) {
+  const dcamera = view.camera;
+  if (!dcamera) return console.warn("No camera found in view");
 
-function getProgram(gl, vertexSource, fragmentSource) {
-  const vs = getShader(gl, vertexSource, 'vertex');
-  const fs = getShader(gl, fragmentSource, 'fragment');
-  if (!vs || !fs) return null;
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.error(gl.getProgramInfoLog(program));
-    return null;
-  }
-  return program;
-}
+  const tex = glBinding.getCameraImage(dcamera);
+  if (!tex) return console.warn("Camera image is null");
 
-function initWebGLResources(gl) {
-  const vertexSrc = `
-    attribute vec4 aVertexPosition;
-    attribute vec2 aTextureCoord;
-    varying vec2 vTexCoord;
-    void main(void) {
-      gl_Position = aVertexPosition;
-      vTexCoord = aTextureCoord;
-    }
-  `;
-  const fragmentSrc = `
-    #extension GL_OES_EGL_image_external : require
-    precision mediump float;
-    varying vec2 vTexCoord;
-    uniform samplerExternalOES uSampler;
-    void main(void) {
-      gl_FragColor = texture2D(uSampler, vTexCoord);
-    }
-  `;
+  const width = dcamera.width;
+  const height = dcamera.height;
 
-  const program = getProgram(gl, vertexSrc, fragmentSrc);
-  const texture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, texture);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
 
   const framebuffer = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, texture, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-  return { program, texture, framebuffer };
-}
+  const pixels = new Uint8Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-async function captureImage(gl, glBinding, dcamera, { program, texture, framebuffer }) {
-  const img = glBinding.getCameraImage(dcamera);
-  const w = dcamera.width, h = dcamera.height;
-  if (!img) return;
+  const imgData = new ImageData(new Uint8ClampedArray(pixels), width, height);
+  ctx.putImageData(imgData, 0, 0);
 
-  gl.useProgram(program);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, img);
-  gl.uniform1i(gl.getUniformLocation(program, 'uSampler'), 0);
-
-  const vertices = new Float32Array([
-    -1, -1, 0, 0, 1, -1, 1, 0,
-    -1, 1, 0, 1, 1, 1, 1, 1
-  ]);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-  const pos = gl.getAttribLocation(program, 'aVertexPosition');
-  const tex = gl.getAttribLocation(program, 'aTextureCoord');
-  gl.enableVertexAttribArray(pos);
-  gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 16, 0);
-  gl.enableVertexAttribArray(tex);
-  gl.vertexAttribPointer(tex, 2, gl.FLOAT, false, 16, 8);
-
-  gl.viewport(0, 0, w, h);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-  const pixels = new Uint8Array(w * h * 4);
-  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-
-  const flipped = new Uint8ClampedArray(pixels.length);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      const j = ((h - y - 1) * w + x) * 4;
-      flipped.set(pixels.slice(i, i + 4), j);
-    }
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  ctx.putImageData(new ImageData(flipped, w, h), 0, 0);
-
-  const tensor = tf.browser.fromPixels(canvas).div(255);
-  const resized = tf.image.resizeBilinear(tensor, [224, 224]).expandDims();
-  const pred = await model.predict(resized);
-  const arr = pred.dataSync();
+  const tensor = tf.browser.fromPixels(canvas).resizeBilinear([224, 224]).div(255.0).expandDims();
+  const pred = await model.predict(tensor);
+  const mask = pred.dataSync();
 
   const maskCanvas = document.createElement('canvas');
   maskCanvas.width = 224;
   maskCanvas.height = 224;
-  const maskCtx = maskCanvas.getContext('2d');
-  const maskImageData = maskCtx.createImageData(224, 224);
+  const mctx = maskCanvas.getContext('2d');
+  const maskImg = mctx.createImageData(224, 224);
+
   for (let i = 0; i < 224 * 224; i++) {
-    const val = arr[i] * 255;
-    maskImageData.data.set([val, val, val, 255], i * 4);
+    const val = mask[i] * 255;
+    maskImg.data.set([val, val, val, 255], i * 4);
   }
-  maskCtx.putImageData(maskImageData, 0, 0);
+  mctx.putImageData(maskImg, 0, 0);
   document.getElementById('maskImage').src = maskCanvas.toDataURL();
 }
 
-// UI
-startARBtn.onclick = async () => {
+function onXRFrame(t, frame) {
+  session.requestAnimationFrame(onXRFrame);
+  const pose = frame.getViewerPose(referenceSpace);
+  if (!pose) return;
+
+  const view = pose.views[0];
+  const viewport = session.renderState.baseLayer.getViewport(view);
+  renderer.setSize(viewport.width, viewport.height);
+
+  camera.matrix.fromArray(view.transform.matrix);
+  camera.projectionMatrix.fromArray(view.projectionMatrix);
+  camera.updateMatrixWorld(true);
+
+  renderer.render(scene, camera);
+
+  if (captureRequested) {
+    captureRequested = false;
+    captureFrame(view);
+  }
+}
+
+document.getElementById('startARBtn').onclick = async () => {
   await loadModel();
   await activateXR();
-  startARBtn.style.display = 'none';
 };
-captureButton.onclick = () => captureRequested = true;
+
+document.getElementById('captureButton').onclick = () => captureRequested = true;
 </script>
 </body>
 </html>
