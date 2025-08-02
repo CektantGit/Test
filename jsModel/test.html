@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Optimized AR with WebXR</title>
+  <script src="https://unpkg.com/three@0.122.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.122.0/examples/js/vr/ARButton.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.7.0/dist/tf.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    .overlay2, .info, #startARBtn, #captureButton { position: absolute; z-index: 12; }
+    .overlay2 { top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
+    .button, #startARBtn, #captureButton { background: rgba(0,0,0,0.5); color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; }
+    .info { bottom: 35px; right: 50px; background: rgba(0,0,0,0.5); color: white; padding: 10px; border-radius: 5px; }
+    #startARBtn { top: 10px; left: 10px; }
+    #captureButton { top: 50px; left: 10px; }
+  </style>
+</head>
+<body>
+  <button id="startARBtn">Start AR</button>
+  <button id="captureButton">Capture Image</button>
+  <div class="overlay2">
+    <img id="maskImage"/>
+  </div>
+  <div class="info" id="info">Information will be displayed here.</div>
+  <script>
+    let camera, scene, renderer, session, glBinding, resources;
+    let model;
+    let isProcessing = false;
+    let runAutoLoop = false;
+
+    let positionBuffer, position, texCoord;
+
+    const fragmentSource = `
+      #extension GL_OES_EGL_image_external : require
+      precision mediump float;
+      varying vec2 vTexCoord;
+      uniform samplerExternalOES uSampler;
+      void main(void) {
+        gl_FragColor = texture2D(uSampler, vTexCoord);
+      }
+    `;
+
+    const vertexSource = `
+      attribute vec4 aVertexPosition;
+      attribute vec2 aTextureCoord;
+      varying vec2 vTexCoord;
+      void main(void) {
+        gl_Position = aVertexPosition;
+        vTexCoord = vec2(aTextureCoord.x, 1.0 - aTextureCoord.y);
+      }
+    `;
+
+    function getShader(gl, source, type) {
+      const shader = gl.createShader(type === 'fragment' ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    function getProgram(gl, vertexSource, fragmentSource) {
+      const vertexShader = getShader(gl, vertexSource, 'vertex');
+      const fragmentShader = getShader(gl, fragmentSource, 'fragment');
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(program));
+        return null;
+      }
+      return program;
+    }
+
+    function initWebGLResources(gl) {
+      const program = getProgram(gl, vertexSource, fragmentSource);
+      const copyTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, copyTexture);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+      const framebuffer = gl.createFramebuffer();
+
+      const vertices = new Float32Array([
+        -1.0, -1.0, 0.0, 0.0,
+         1.0, -1.0, 1.0, 0.0,
+        -1.0,  1.0, 0.0, 1.0,
+         1.0,  1.0, 1.0, 1.0
+      ]);
+      positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+      position = gl.getAttribLocation(program, 'aVertexPosition');
+      texCoord = gl.getAttribLocation(program, 'aTextureCoord');
+
+      return { program, copyTexture, framebuffer };
+    }
+
+    async function captureImage(gl, glBinding, dcamera, resources) {
+      const { program, copyTexture, framebuffer } = resources;
+      const texture = glBinding.getCameraImage(dcamera);
+      const width = dcamera.width;
+      const height = dcamera.height;
+      if (!texture) return;
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_EXTERNAL_OES, copyTexture, 0);
+      gl.useProgram(program);
+      gl.viewport(0, 0, width, height);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, texture);
+      gl.uniform1i(gl.getUniformLocation(program, 'uSampler'), 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.enableVertexAttribArray(position);
+      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 16, 0);
+      gl.enableVertexAttribArray(texCoord);
+      gl.vertexAttribPointer(texCoord, 2, gl.FLOAT, false, 16, 8);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      const readbackPixels = new Uint8Array(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, readbackPixels);
+      const tensor = tf.tensor3d(readbackPixels, [height, width, 4], 'int32');
+      const rgb = tensor.slice([0, 0, 0], [-1, -1, 3]).div(255);
+      const batched = tf.image.resizeBilinear(rgb, [224, 224]).expandDims();
+
+      const prediction = await model.predict(batched);
+      const maskData = prediction.dataSync();
+      const out = new Uint8ClampedArray(224 * 224 * 4);
+      for (let i = 0; i < 224 * 224; i++) {
+        const v = maskData[i] * 255;
+        out.set([v, v, v, 255], i * 4);
+      }
+
+      const maskCanvas = new OffscreenCanvas(224, 224);
+      const ctx = maskCanvas.getContext('2d');
+      ctx.putImageData(new ImageData(out, 224, 224), 0, 0);
+      const blob = await maskCanvas.convertToBlob();
+      document.getElementById('maskImage').src = URL.createObjectURL(blob);
+    }
+
+    async function loadModel() {
+      model = await tf.loadLayersModel('jsModel/model.json');
+    }
+
+    async function activateXR() {
+      const canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+      const gl = canvas.getContext('webgl', { xrCompatible: true });
+      session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'], domOverlay: { root: document.body }});
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+      glBinding = new XRWebGLBinding(session, gl);
+      resources = initWebGLResources(gl);
+
+      const referenceSpace = await session.requestReferenceSpace('local');
+
+      renderer = new THREE.WebGLRenderer({ canvas, context: gl, alpha: true });
+      renderer.autoClear = false;
+      camera = new THREE.PerspectiveCamera();
+      camera.matrixAutoUpdate = false;
+      scene = new THREE.Scene();
+
+      const onXRFrame = (time, frame) => {
+        session.requestAnimationFrame(onXRFrame);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+        const pose = frame.getViewerPose(referenceSpace);
+        if (!pose) return;
+
+        const view = pose.views[0];
+        const viewport = session.renderState.baseLayer.getViewport(view);
+        renderer.setSize(viewport.width, viewport.height);
+
+        camera.matrix.fromArray(view.transform.matrix);
+        camera.projectionMatrix.fromArray(view.projectionMatrix);
+        camera.updateMatrixWorld(true);
+
+        if (runAutoLoop && !isProcessing && view.camera) {
+          isProcessing = true;
+          captureImage(gl, glBinding, view.camera, resources).then(() => {
+            isProcessing = false;
+          });
+        }
+
+        renderer.render(scene, camera);
+      };
+
+      session.requestAnimationFrame(onXRFrame);
+    }
+
+    document.getElementById('startARBtn').onclick = async () => {
+      await loadModel();
+      await activateXR();
+    };
+
+    document.getElementById('captureButton').onclick = () => {
+      if (!isProcessing) runAutoLoop = true;
+    };
+  </script>
+</body>
+</html>
