@@ -25,13 +25,13 @@
       cursor: pointer;
     }
     #captureButton { top: 60px; }
-    #maskImage {
+    #maskCanvas {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      object-fit: contain;
+      image-rendering: pixelated;
       z-index: 10;
       pointer-events: none;
     }
@@ -41,7 +41,7 @@
   <button id="startARBtn">Start AR</button>
   <button id="captureButton">Capture Image</button>
   <div id="info">Log:</div>
-  <img id="maskImage" />
+  <canvas id="maskCanvas" width="224" height="224"></canvas>
 
   <script>
     let model, renderer, camera, scene, gl, session, glBinding;
@@ -128,9 +128,7 @@
         const pred = await model.predict(resized);
         const arr = pred.dataSync();
 
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = 224;
-        maskCanvas.height = 224;
+        const maskCanvas = document.getElementById('maskCanvas');
         const maskCtx = maskCanvas.getContext('2d');
         const imageData = maskCtx.createImageData(224, 224);
 
@@ -143,7 +141,6 @@
         }
 
         maskCtx.putImageData(imageData, 0, 0);
-        document.getElementById('maskImage').src = maskCanvas.toDataURL('image/png');
       } catch (e) {
         log("Error: " + e.message);
       } finally {
