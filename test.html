@@ -3,44 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Optimized AR with WebXR</title>
+  <title>Fixed WebXR AR with Segmentation</title>
   <script src="https://unpkg.com/three@0.122.0/build/three.js"></script>
-  <script src="https://unpkg.com/three@0.122.0/examples/js/vr/ARButton.js"></script>
+  <script src="https://unpkg.com/three@0.122.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.7.0/dist/tf.min.js"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-    .overlay2, .info, #startARBtn, #captureButton { position: absolute; z-index: 12; }
-    .overlay2 { top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
-    .button, #startARBtn, #captureButton { background: rgba(0,0,0,0.5); color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; }
-    .info { bottom: 35px; right: 50px; background: rgba(0,0,0,0.5); color: white; padding: 10px; border-radius: 5px; }
-    #startARBtn { top: 10px; left: 10px; }
-    #captureButton { top: 50px; left: 10px; }
+    #startARBtn, #captureButton, #maskImage {
+      position: absolute;
+      z-index: 12;
+    }
+    #startARBtn {
+      top: 10px;
+      left: 10px;
+      padding: 10px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+    #captureButton {
+      top: 60px;
+      left: 10px;
+      padding: 10px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+    #maskImage {
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <button id="startARBtn">Start AR</button>
   <button id="captureButton">Capture Image</button>
-  <div class="overlay2">
-    <img id="maskImage"/>
-  </div>
-  <div class="info" id="info">Information will be displayed here.</div>
+  <img id="maskImage"/>
+
   <script>
-    let camera, scene, renderer, session, glBinding, resources;
+    let renderer, scene, camera, session, glBinding, resources;
     let model;
     let isProcessing = false;
     let runAutoLoop = false;
+    let viewerSpace, hitTestSource;
     let positionBuffer, position, texCoord;
-
-    const fragmentSource = `
-      #extension GL_OES_EGL_image_external : require
-      precision mediump float;
-      varying vec2 vTexCoord;
-      uniform samplerExternalOES uSampler;
-      void main(void) {
-        gl_FragColor = texture2D(uSampler, vTexCoord);
-      }
-    `;
 
     const vertexSource = `
       attribute vec4 aVertexPosition;
@@ -49,6 +62,16 @@
       void main(void) {
         gl_Position = aVertexPosition;
         vTexCoord = vec2(aTextureCoord.x, 1.0 - aTextureCoord.y);
+      }
+    `;
+
+    const fragmentSource = `
+      #extension GL_OES_EGL_image_external : require
+      precision mediump float;
+      varying vec2 vTexCoord;
+      uniform samplerExternalOES uSampler;
+      void main(void) {
+        gl_FragColor = texture2D(uSampler, vTexCoord);
       }
     `;
 
@@ -99,19 +122,13 @@
       gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
-      position = gl.getAttribLocation(program, 'aVertexPosition');
-      texCoord = gl.getAttribLocation(program, 'aTextureCoord');
-
       return { program, copyTexture, framebuffer };
     }
 
     async function captureImage(gl, glBinding, dcamera, resources) {
       const { program, copyTexture, framebuffer } = resources;
       const texture = glBinding.getCameraImage(dcamera);
-      if (!texture) {
-        console.warn("Camera texture is null");
-        return;
-      }
+      if (!texture) return;
       const width = gl.drawingBufferWidth;
       const height = gl.drawingBufferHeight;
 
@@ -123,10 +140,14 @@
       gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, texture);
       gl.uniform1i(gl.getUniformLocation(program, 'uSampler'), 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+      const position = gl.getAttribLocation(program, 'aVertexPosition');
+      const texCoord = gl.getAttribLocation(program, 'aTextureCoord');
       gl.enableVertexAttribArray(position);
       gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 16, 0);
       gl.enableVertexAttribArray(texCoord);
       gl.vertexAttribPointer(texCoord, 2, gl.FLOAT, false, 16, 8);
+
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
       const readbackPixels = new Uint8Array(width * height * 4);
@@ -158,30 +179,33 @@
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       const gl = canvas.getContext('webgl', { xrCompatible: true });
+
       session = await navigator.xr.requestSession('immersive-ar', {
         requiredFeatures: ['hit-test'],
         optionalFeatures: ['camera-access', 'dom-overlay'],
         domOverlay: { root: document.body }
       });
-      console.log("XR session started");
+
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       glBinding = new XRWebGLBinding(session, gl);
       resources = initWebGLResources(gl);
 
       const referenceSpace = await session.requestReferenceSpace('local');
+      viewerSpace = await session.requestReferenceSpace('viewer');
+      hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      renderer = new THREE.WebGLRenderer({ canvas, context: gl, alpha: true });
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
       renderer.autoClear = false;
       camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
 
-      const onXRFrame = (time, frame) => {
+      session.requestAnimationFrame(function onXRFrame(time, frame) {
         session.requestAnimationFrame(onXRFrame);
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
-
         const view = pose.views[0];
         const viewport = session.renderState.baseLayer.getViewport(view);
         renderer.setSize(viewport.width, viewport.height);
@@ -199,9 +223,7 @@
         }
 
         renderer.render(scene, camera);
-      };
-
-      session.requestAnimationFrame(onXRFrame);
+      });
     }
 
     document.getElementById('startARBtn').onclick = async () => {
