@@ -11,9 +11,10 @@
   <style>
     body { margin: 0; overflow: hidden; font-family: monospace; background: white; color: black; }
     canvas { display: block; }
-    #info { position: absolute; top: 0; left: 0; white-space: pre-wrap; font-size: 12px; background: rgba(255,255,255,0.7); padding: 10px; z-index: 20; color: black; }
+    #info { position: absolute; bottom: 10px; left: 10px; white-space: pre-wrap; font-size: 12px; background: rgba(255,255,255,0.8); padding: 10px; z-index: 20; max-width: 90vw; }
     #captureButton, #startARBtn {
       position: absolute;
+      top: 10px;
       left: 10px;
       z-index: 15;
       padding: 10px;
@@ -23,7 +24,6 @@
       border-radius: 5px;
       cursor: pointer;
     }
-    #startARBtn { top: 10px; }
     #captureButton { top: 60px; }
     #maskImage {
       position: absolute;
@@ -45,58 +45,50 @@
 
   <script>
     let model, renderer, camera, scene, gl, session, glBinding;
+    let running = false;
+    let processing = false;
     let referenceSpace;
-    let captureActive = false;
 
     async function loadModel() {
-      try {
-        model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded.");
-      } catch (e) {
-        log("Model load error: " + e.message);
-      }
+      model = await tf.loadLayersModel('jsModel/model.json');
+      log("Model loaded.");
     }
 
     function log(msg) {
-      const info = document.getElementById('info');
-      info.textContent += "\n" + msg;
+      document.getElementById('info').textContent = "Log:\n" + msg;
     }
 
     async function startAR() {
-      try {
-        await loadModel();
-        const canvas = document.createElement('canvas');
-        document.body.appendChild(canvas);
-        gl = canvas.getContext('webgl', { xrCompatible: true });
+      await loadModel();
+      const canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+      gl = canvas.getContext('webgl', { xrCompatible: true });
 
-        session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
-          domOverlay: { root: document.body }
-        });
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
+        domOverlay: { root: document.body }
+      });
 
-        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-        referenceSpace = await session.requestReferenceSpace('local');
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+      referenceSpace = await session.requestReferenceSpace('local');
+      glBinding = new XRWebGLBinding(session, gl);
 
-        glBinding = new XRWebGLBinding(session, gl);
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
+      renderer.autoClear = false;
+      camera = new THREE.PerspectiveCamera();
+      camera.matrixAutoUpdate = false;
+      scene = new THREE.Scene();
 
-        renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl, alpha: true });
-        renderer.autoClear = false;
-        camera = new THREE.PerspectiveCamera();
-        camera.matrixAutoUpdate = false;
-        scene = new THREE.Scene();
-
-        session.requestAnimationFrame(onXRFrame);
-        document.getElementById('startARBtn').style.display = 'none';
-      } catch (e) {
-        log("AR start error: " + e.message);
-      }
+      session.requestAnimationFrame(onXRFrame);
+      document.getElementById('startARBtn').style.display = 'none';
     }
 
-    async function captureImage(view) {
+    async function processCameraFrame(view) {
+      if (processing) return;
+      processing = true;
       try {
         const texture = glBinding.getCameraImage(view.camera);
         if (!texture) return;
-
         const width = view.camera.width;
         const height = view.camera.height;
         const readTex = gl.createTexture();
@@ -132,6 +124,7 @@
 
         const img = tf.browser.fromPixels(canvas, 3).div(255);
         const resized = tf.image.resizeBilinear(img, [224, 224]).expandDims();
+
         const pred = await model.predict(resized);
         const arr = pred.dataSync();
 
@@ -152,7 +145,9 @@
         maskCtx.putImageData(imageData, 0, 0);
         document.getElementById('maskImage').src = maskCanvas.toDataURL('image/png');
       } catch (e) {
-        log("Capture error: " + e.message);
+        log("Error: " + e.message);
+      } finally {
+        processing = false;
       }
     }
 
@@ -173,13 +168,16 @@
 
       renderer.render(scene, camera);
 
-      if (captureActive) {
-        captureImage(view);
-      }
+      if (running) processCameraFrame(view);
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
-    document.getElementById('captureButton').addEventListener('click', () => captureActive = true);
+    document.getElementById('captureButton').addEventListener('click', () => {
+      if (!running) {
+        log("Capture started.");
+        running = true;
+      }
+    });
   </script>
 </body>
 </html>
