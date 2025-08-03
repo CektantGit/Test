@@ -49,9 +49,9 @@
     let processing = false;
     let referenceSpace;
 
-    let maskCtx;
-    const texCanvas = document.createElement('canvas');
-    const texCtx = texCanvas.getContext('2d');
+    let offscreenCanvas = document.createElement('canvas');
+    let offscreenCtx = offscreenCanvas.getContext('2d');
+    let maskCtx = document.getElementById('maskCanvas').getContext('2d');
 
     async function loadModel() {
       model = await tf.loadLayersModel('jsModel/model.json');
@@ -83,8 +83,6 @@
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
 
-      maskCtx = document.getElementById('maskCanvas').getContext('2d');
-
       session.requestAnimationFrame(onXRFrame);
       document.getElementById('startARBtn').style.display = 'none';
     }
@@ -93,31 +91,48 @@
       if (processing) return;
       processing = true;
       try {
-        const tex = glBinding.getCameraImage(view.camera);
-        const texW = view.camera.width;
-        const texH = view.camera.height;
+        const texture = glBinding.getCameraImage(view.camera);
+        const width = view.camera.width;
+        const height = view.camera.height;
 
-        texCanvas.width = texW;
-        texCanvas.height = texH;
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
-        const bitmap = await createImageBitmap(tex);
-        texCtx.drawImage(bitmap, 0, 0, texW, texH);
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        gl.viewport(0, 0, width, height);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
 
-        const img = tf.browser.fromPixels(texCanvas).div(255);
+        const pixels = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        offscreenCanvas.width = width;
+        offscreenCanvas.height = height;
+
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), width, height);
+        offscreenCtx.putImageData(imageData, 0, 0);
+
+        const img = tf.browser.fromPixels(offscreenCanvas, 3).div(255);
         const resized = tf.image.resizeBilinear(img, [224, 224]).expandDims();
 
         const pred = await model.predict(resized);
         const arr = await pred.data();
 
-        const imageData = maskCtx.createImageData(224, 224);
+        const output = maskCtx.createImageData(224, 224);
         for (let i = 0; i < 224 * 224; i++) {
-          const val = arr[i] * 255;
-          imageData.data[i * 4] = val;
-          imageData.data[i * 4 + 1] = val;
-          imageData.data[i * 4 + 2] = val;
-          imageData.data[i * 4 + 3] = 255;
+          const v = arr[i] * 255;
+          output.data[i * 4] = v;
+          output.data[i * 4 + 1] = v;
+          output.data[i * 4 + 2] = v;
+          output.data[i * 4 + 3] = 255;
         }
-        maskCtx.putImageData(imageData, 0, 0);
+        maskCtx.putImageData(output, 0, 0);
+
       } catch (e) {
         log("Error: " + e.message);
       } finally {
