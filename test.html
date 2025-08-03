@@ -89,23 +89,35 @@
       if (processing) return;
       processing = true;
       try {
-        const baseLayer = session.renderState.baseLayer;
-        const width = baseLayer.framebufferWidth;
-        const height = baseLayer.framebufferHeight;
+        const cameraTexture = glBinding.getCameraImage(view.camera);
+        if (!cameraTexture) {
+          log("Camera texture not available.");
+          processing = false;
+          return;
+        }
 
-        const pixels = new Uint8Array(width * height * 4);
-        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const width = view.camera.width;
+        const height = view.camera.height;
 
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+        const tempCtx = tempCanvas.getContext('2d');
 
-        const imageData = ctx.createImageData(width, height);
-        imageData.data.set(pixels);
-        ctx.putImageData(imageData, 0, 0);
+        const videoTexture = new THREE.Texture(tempCanvas);
+        videoTexture.needsUpdate = true;
 
-        const input = tf.browser.fromPixels(canvas, 3).div(255);
+        const material = new THREE.MeshBasicMaterial({ map: videoTexture });
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+
+        const rtScene = new THREE.Scene();
+        rtScene.add(quad);
+        const rtCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+        renderer.setRenderTarget(null);
+        renderer.render(rtScene, rtCamera);
+
+        const input = tf.browser.fromPixels(tempCanvas, 3).div(255);
         const resized = tf.image.resizeBilinear(input, [224, 224]).expandDims();
         const pred = await model.predict(resized);
         const arr = await pred.data();
