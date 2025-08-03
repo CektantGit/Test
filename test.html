@@ -49,6 +49,10 @@
     let processing = false;
     let referenceSpace;
 
+    const offscreenCanvas = document.createElement('canvas');
+    const offscreenCtx = offscreenCanvas.getContext('2d');
+    let maskCtx;
+
     async function loadModel() {
       model = await tf.loadLayersModel('jsModel/model.json');
       log("Model loaded.");
@@ -79,6 +83,8 @@
       camera.matrixAutoUpdate = false;
       scene = new THREE.Scene();
 
+      maskCtx = document.getElementById('maskCanvas').getContext('2d');
+
       session.requestAnimationFrame(onXRFrame);
       document.getElementById('startARBtn').style.display = 'none';
     }
@@ -87,51 +93,20 @@
       if (processing) return;
       processing = true;
       try {
-        const texture = glBinding.getCameraImage(view.camera);
-        if (!texture) return;
         const width = view.camera.width;
         const height = view.camera.height;
-        const readTex = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, readTex);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, width, height, 0);
 
-        const fb = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, readTex, 0);
+        offscreenCanvas.width = width;
+        offscreenCanvas.height = height;
+        offscreenCtx.drawImage(gl.canvas, 0, 0, width, height);
 
-        const pixels = new Uint8Array(width * height * 4);
-        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-
-        let flipped = new Uint8ClampedArray(pixels.length);
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const i = (y * width + x) * 4;
-            const fi = ((height - y - 1) * width + x) * 4;
-            flipped[fi] = pixels[i];
-            flipped[fi + 1] = pixels[i + 1];
-            flipped[fi + 2] = pixels[i + 2];
-            flipped[fi + 3] = 255;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.putImageData(new ImageData(flipped, width, height), 0, 0);
-
-        const img = tf.browser.fromPixels(canvas, 3).div(255);
+        const img = tf.browser.fromPixels(offscreenCanvas, 3).div(255);
         const resized = tf.image.resizeBilinear(img, [224, 224]).expandDims();
 
         const pred = await model.predict(resized);
         const arr = await pred.data();
 
-        const maskCanvas = document.getElementById('maskCanvas');
-        const maskCtx = maskCanvas.getContext('2d');
         const imageData = maskCtx.createImageData(224, 224);
-
         for (let i = 0; i < 224 * 224; i++) {
           const val = arr[i] * 255;
           imageData.data[i * 4] = val;
