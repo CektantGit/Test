@@ -3,24 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Ultra Fast AR Segmentation</title>
+  <title>Max Speed AR Segmentation</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
   <style>
-    html, body {
-      margin: 0;
-      overflow: hidden;
-      background: black;
-    }
-    #maskCanvas {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 10;
-      pointer-events: none;
-      transform: rotate(180deg) scaleX(-1);
-    }
+    html, body { margin: 0; overflow: hidden; background: black; }
     #info {
       position: absolute;
       bottom: 10px;
@@ -31,7 +18,14 @@
       font-family: monospace;
       font-size: 12px;
       z-index: 20;
-      white-space: pre-wrap;
+    }
+    #maskCanvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+      pointer-events: none;
     }
     #startBtn {
       position: absolute;
@@ -50,130 +44,96 @@
 <body>
   <button id="startBtn">Start AR</button>
   <canvas id="maskCanvas" width="224" height="224"></canvas>
-  <div id="info">Status: idle</div>
+  <div id="info">Loading...</div>
 
   <script>
     let model;
-    let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = new OffscreenCanvas(224, 224);
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 224;
+    tempCanvas.height = 224;
     const tempCtx = tempCanvas.getContext('2d');
-    const processingLock = { busy: false };
-    const imageBuffer = new Uint8ClampedArray(224 * 224 * 4);
-    const fpsHistory = [];
 
-    async function loadModel() {
+    const imageBuffer = new Uint8ClampedArray(224 * 224 * 4);
+    const maskImageData = new ImageData(imageBuffer, 224, 224);
+    const info = document.getElementById('info');
+
+    let video, stream, lastFrameTime = performance.now(), fpsList = [];
+
+    async function setupModel() {
       await tf.setBackend('webgl');
       await tf.ready();
-      model = await tf.loadLayersModel('jsModel/model.json');
-      log("✅ Model loaded");
+      model = await tf.loadLayersModel('./jsModel/model.json');
+      info.textContent = 'Model loaded. Click start.';
     }
 
-    function log(msg) {
-      document.getElementById('info').textContent = msg;
+    async function startCamera() {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video = document.createElement('video');
+      video.srcObject = stream;
+      await video.play();
+      video.width = 224;
+      video.height = 224;
+      info.textContent = 'Camera started. Running...';
+      runFrameLoop();
     }
 
-    async function startAR() {
-      await loadModel();
-
-      const canvas = document.createElement('canvas');
-      document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true });
-
-      try {
-        session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['camera-access', 'dom-overlay'],
-          domOverlay: { root: document.body }
-        });
-      } catch (e) {
-        log('❌ AR session failed: ' + e.message);
-        return;
-      }
-
-      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-      const referenceSpace = await session.requestReferenceSpace('local');
-      glBinding = new XRWebGLBinding(session, gl);
-
-      let lastFrameTime = performance.now();
-
-      session.requestAnimationFrame(function onFrame(time, frame) {
-        session.requestAnimationFrame(onFrame);
-        if (processingLock.busy) return;
-
-        const pose = frame.getViewerPose(referenceSpace);
-        if (!pose) return;
-
-        const view = pose.views[0];
-        const tex = glBinding.getCameraImage(view.camera);
-        if (!tex) return;
-
-        processingLock.busy = true;
-
+    async function runFrameLoop() {
+      const process = async () => {
         const t0 = performance.now();
 
-        const fb = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        tempCtx.drawImage(video, 0, 0, 224, 224);
+        const input = tf.browser.fromPixels(tempCanvas, 3)
+                                .toFloat()
+                                .div(255)
+                                .expandDims();
 
-        const w = view.camera.width;
-        const h = view.camera.height;
-        const pixels = new Uint8Array(w * h * 4);
-        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-        const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
+        await tf.nextFrame();
+        const t1 = performance.now();
 
-        createImageBitmap(imageData).then(async bitmap => {
-          tempCtx.clearRect(0, 0, 224, 224);
-          tempCtx.drawImage(bitmap, 0, 0, 224, 224);
+        const prediction = await model.predict(input);
+        await tf.nextFrame();
+        const t2 = performance.now();
 
-          const input = tf.browser.fromPixels(tempCanvas, 3)
-                                  .toFloat()
-                                  .div(255.0)
-                                  .expandDims();
+        const data = await prediction.squeeze().data();
+        for (let i = 0; i < data.length; i++) {
+          const v = 255 - (data[i] * 255) | 0;
+          const j = i * 4;
+          imageBuffer[j + 0] = v;
+          imageBuffer[j + 1] = v;
+          imageBuffer[j + 2] = v;
+          imageBuffer[j + 3] = 255;
+        }
+        maskCtx.putImageData(maskImageData, 0, 0);
 
-          await tf.nextFrame(); // remove any async GPU stall
+        tf.dispose([input, prediction]);
 
-          const t1 = performance.now();
-          const pred = await model.predict(input); // [1, 224, 224, 1]
-          await tf.nextFrame();
+        const t3 = performance.now();
+        const now = performance.now();
+        const delta = now - lastFrameTime;
+        lastFrameTime = now;
+        fpsList.push(1000 / delta);
+        if (fpsList.length > 30) fpsList.shift();
+        const avgFps = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;
 
-          const t2 = performance.now();
+        info.textContent =
+          `Pre: ${(t1 - t0).toFixed(1)}ms | ` +
+          `Infer: ${(t2 - t1).toFixed(1)}ms | ` +
+          `Post: ${(t3 - t2).toFixed(1)}ms | ` +
+          `FPS: ${avgFps.toFixed(1)}`;
 
-          const predData = await pred.data(); // Float32Array [0..1]
+        video.requestVideoFrameCallback(process);
+      };
 
-          // === Fastest possible postprocess ===
-          for (let i = 0; i < 224 * 224; i++) {
-            const val = 255 - Math.round(predData[i] * 255);
-            const j = i * 4;
-            imageBuffer[j + 0] = val; // R
-            imageBuffer[j + 1] = val; // G
-            imageBuffer[j + 2] = val; // B
-            imageBuffer[j + 3] = 255; // A
-          }
-
-          const maskImg = new ImageData(imageBuffer, 224, 224);
-          maskCtx.putImageData(maskImg, 0, 0);
-
-          tf.dispose([input, pred]);
-
-          const t3 = performance.now();
-
-          const now = performance.now();
-          const frameTime = now - lastFrameTime;
-          lastFrameTime = now;
-          fpsHistory.push(1000 / frameTime);
-          if (fpsHistory.length > 30) fpsHistory.shift();
-          const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-          log(`✅ Pre: ${(t1 - t0).toFixed(1)}ms | Infer: ${(t2 - t1).toFixed(1)}ms | Post: ${(t3 - t2).toFixed(1)}ms | FPS: ${avgFps.toFixed(1)}`);
-          processingLock.busy = false;
-        });
-      });
-
-      document.getElementById('startBtn').style.display = 'none';
+      video.requestVideoFrameCallback(process);
     }
 
-    document.getElementById('startBtn').addEventListener('click', startAR);
+    document.getElementById('startBtn').addEventListener('click', async () => {
+      document.getElementById('startBtn').style.display = 'none';
+      await setupModel();
+      await startCamera();
+    });
   </script>
 </body>
 </html>
