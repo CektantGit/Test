@@ -49,13 +49,15 @@
   <div id="info">Status: idle</div>
 
   <script type="module">
-    import { createShaderPipeline } from './resize-shader.js';
+    import { initResizeShader, resizeToCanvas } from './resize-shader.js';
 
     let model;
-    let gl, session, glBinding, shaderPipeline;
+    let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     const processingLock = { busy: false };
+    let shaderTools, resizeFBO;
+    let resizeCanvas;
     let fpsHistory = [];
 
     async function loadModel() {
@@ -88,7 +90,6 @@
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       gl = canvas.getContext('webgl2', { xrCompatible: true });
-      shaderPipeline = await createShaderPipeline(gl);
 
       try {
         session = await navigator.xr.requestSession('immersive-ar', {
@@ -104,6 +105,12 @@
       const referenceSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
 
+      resizeCanvas = document.createElement('canvas');
+      resizeCanvas.width = 224;
+      resizeCanvas.height = 224;
+      shaderTools = initResizeShader(gl);
+      resizeFBO = gl.createFramebuffer();
+
       let lastFrameTime = performance.now();
 
       session.requestAnimationFrame(function onFrame(time, frame) {
@@ -118,11 +125,11 @@
         if (!tex) return;
 
         processingLock.busy = true;
-
         const tPreStart = performance.now();
 
-        const resized = shaderPipeline.resize(tex, view.camera.width, view.camera.height);
-        const input = tf.tidy(() => tf.browser.fromPixels(resized).toFloat().div(255).expandDims());
+        resizeToCanvas(gl, shaderTools, tex, view.camera.width, view.camera.height, resizeCanvas, resizeFBO);
+
+        const input = tf.tidy(() => tf.browser.fromPixels(resizeCanvas).toFloat().div(255).expandDims());
 
         const tPreEnd = performance.now();
 
@@ -130,12 +137,13 @@
 
         prediction.data().then(() => {
           const tPredictEnd = performance.now();
-          tf.browser.toPixels(tf.sub(1, prediction), resized).then(() => {
+          tf.browser.toPixels(tf.sub(1, prediction), resizeCanvas).then(() => {
             const tPostEnd = performance.now();
+
             maskCanvas.width = window.innerWidth;
             maskCanvas.height = window.innerHeight;
             maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            maskCtx.drawImage(resized.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+            maskCtx.drawImage(resizeCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
             tf.dispose([input, prediction]);
             processingLock.busy = false;
