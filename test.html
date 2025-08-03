@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (Max Optimized)</title>
+  <title>AR Real-time Segmentation (WebGPU)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
@@ -59,11 +59,6 @@
     const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
 
-    const resizeCanvas = document.createElement('canvas');
-    resizeCanvas.width = 224;
-    resizeCanvas.height = 224;
-    const resizeCtx = resizeCanvas.getContext('2d');
-
     let fpsHistory = [];
 
     async function loadModel() {
@@ -72,9 +67,10 @@
         await tf.ready();
         log('Using WebGPU backend\n');
       } catch (e) {
+        log('WebGPU init failed, falling back to WebGL...');
         await tf.setBackend('webgl');
         await tf.ready();
-        log('WebGPU unavailable, using WebGL\n');
+        log('Using WebGL backend\n');
       }
       try {
         model = await tf.loadLayersModel('jsModel/model.json');
@@ -116,6 +112,7 @@
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
         if (processingLock.busy) return;
+        processingLock.busy = true;
 
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
@@ -137,11 +134,8 @@
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
         const imgData = new ImageData(new Uint8ClampedArray(pixels), w, h);
         tempCtx.putImageData(imgData, 0, 0);
-        resizeCtx.drawImage(tempCanvas, 0, 0, 224, 224);
 
-        processingLock.busy = true;
-
-        const input = tf.tidy(() => tf.browser.fromPixels(resizeCanvas, 3).toFloat().div(255).expandDims());
+        const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas, 3).resizeBilinear([224, 224]).toFloat().div(255).expandDims());
         const tPreEnd = performance.now();
 
         const prediction = model.predict(input).squeeze();
