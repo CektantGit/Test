@@ -3,20 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Camera and TensorFlow.js</title>
+    <title>Real-time Camera with TensorFlow.js</title>
     <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: black;
+        }
         #cameraCanvas, #maskCanvas {
             position: absolute;
             top: 0;
             left: 0;
         }
-
         #maskCanvas {
-            pointer-events: none; /* Чтобы избежать взаимодействия с верхним холстом */
+            pointer-events: none;
+        }
+        #debugInfo {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.6);
+            color: lime;
+            font-family: monospace;
+            font-size: 14px;
+            padding: 6px;
+            border-radius: 5px;
+            z-index: 10;
         }
     </style>
 </head>
 <body>
+    <div id="debugInfo">Loading...</div>
     <canvas id="cameraCanvas" width="224" height="224"></canvas>
     <canvas id="maskCanvas" width="224" height="224"></canvas>
 
@@ -29,75 +46,81 @@
         let maskCanvas = document.getElementById('maskCanvas');
         let maskCtx = maskCanvas.getContext('2d');
 
+        const debugDiv = document.getElementById('debugInfo');
+
         let model;
 
-        // Загрузка модели
         async function loadModel() {
             model = await tf.loadLayersModel('./jsModel/model.json');
-            console.log("Модель загружена");
+            console.log("✅ Модель загружена");
+            debugDiv.innerText = "Model loaded. Starting camera...";
         }
 
-        // Инициализация камеры
         async function setupCamera() {
             video = document.createElement('video');
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { exact: "environment" } }
+                video: { facingMode: { exact: "environment" } },
+                audio: false
             });
             video.srcObject = stream;
-            video.play();
-            video.addEventListener('loadeddata', () => {
-                processVideoFrame(); // Начинаем обработку
-            });
+            await video.play();
+            debugDiv.innerText = "Camera ready. Running...";
+            processVideoFrame();
         }
 
         async function processVideoFrame() {
-            // Отображаем изображение с камеры на первом холсте
-            cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            const t0 = performance.now();
 
-            // Преобразование изображения в тензор
+            // === Preprocess ===
+            cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            const t1 = performance.now();
+
             const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
-                                        .resizeBilinear([224, 224])
-                                        .div(255.0)
-                                        .expandDims();
+                                          .resizeBilinear([224, 224])
+                                          .div(255.0)
+                                          .expandDims();
+            const t2 = performance.now();
 
             try {
-                // Прогоняем через модель
+                // === Inference ===
                 const predictions = await model.predict(imageTensor);
+                const t3 = performance.now();
 
-                // Получаем предсказанную маску (224x224, один канал, от 0 до 1)
-                const unetMask = predictions;
-                const unetMaskArray = unetMask.dataSync(); 
+                const unetMaskArray = predictions.dataSync();
+                const t4 = performance.now();
 
-                // Очистка предыдущего кадра маски
+                // === Postprocess ===
                 maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-
-                // Создание изображения для маски
                 const maskImageData = maskCtx.createImageData(224, 224);
 
                 for (let y = 0; y < 224; y++) {
                     for (let x = 0; x < 224; x++) {
-                        const value = unetMaskArray[y * 224 + x] * 255;  // Приведение значений к диапазону [0, 255]
-                        const index = (y * 224 + x) * 4;
-                        maskImageData.data[index + 0] = 255 - value;       // R
-                        maskImageData.data[index + 1] = 255 - value;       // G
-                        maskImageData.data[index + 2] = 255 - value;       // B
-                        maskImageData.data[index + 3] = 255 - value; // A (прозрачность)
+                        const value = unetMaskArray[y * 224 + x] * 255;
+                        const idx = (y * 224 + x) * 4;
+                        maskImageData.data[idx + 0] = 255 - value;
+                        maskImageData.data[idx + 1] = 255 - value;
+                        maskImageData.data[idx + 2] = 255 - value;
+                        maskImageData.data[idx + 3] = 255 - value;
                     }
                 }
 
-                // Накладываем маску на верхний холст
                 maskCtx.putImageData(maskImageData, 0, 0);
+                const t5 = performance.now();
+
+                const preprocessTime = (t2 - t1).toFixed(1);
+                const inferenceTime = (t3 - t2).toFixed(1);
+                const postprocessTime = (t5 - t4).toFixed(1);
+                const totalTime = (t5 - t0).toFixed(1);
+
+                debugDiv.innerText = `⏱ Pre: ${preprocessTime}ms | Infer: ${inferenceTime}ms | Post: ${postprocessTime}ms | Total: ${totalTime}ms`;
 
             } finally {
-                // Явно освобождаем память, чтобы избежать утечек
                 imageTensor.dispose();
-                //predictions.dispose();
             }
 
-            requestAnimationFrame(processVideoFrame); // Повторяем обработку
+            requestAnimationFrame(processVideoFrame);
         }
 
-        // Инициализация: загрузка модели и установка камеры
         loadModel().then(setupCamera);
     </script>
 </body>
