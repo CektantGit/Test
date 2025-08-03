@@ -127,11 +127,14 @@
         const readPixelsBuf = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, readPixelsBuf);
 
+        const imgData = new ImageData(new Uint8ClampedArray(readPixelsBuf), w, h);
+        const sourceCanvas = new OffscreenCanvas(w, h);
+        const sourceCtx = sourceCanvas.getContext('2d');
+        sourceCtx.putImageData(imgData, 0, 0);
+
         const resizeCanvas = new OffscreenCanvas(224, 224);
         const resizeCtx = resizeCanvas.getContext('2d');
-        const imgData = new ImageData(new Uint8ClampedArray(readPixelsBuf), w, h);
-        resizeCtx.putImageData(imgData, 0, 0);
-        resizeCtx.drawImage(resizeCanvas, 0, 0, 224, 224);
+        resizeCtx.drawImage(sourceCanvas, 0, 0, w, h, 0, 0, 224, 224);
 
         const input = tf.tidy(() => tf.browser.fromPixels(resizeCanvas).toFloat().div(255).expandDims());
         const tPreEnd = performance.now();
