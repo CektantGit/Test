@@ -60,9 +60,13 @@
     const resizeCanvas = document.createElement('canvas');
     resizeCanvas.width = 224;
     resizeCanvas.height = 224;
-    const resizeCtx = resizeCanvas.getContext('webgl2');
-    let program, positionBuffer;
-    let fb;
+    const resizeCtx = resizeCanvas.getContext('2d');
+    let fbCanvas = document.createElement('canvas');
+    fbCanvas.width = 224;
+    fbCanvas.height = 224;
+    const fbGl = fbCanvas.getContext('webgl2');
+
+    let program, positionBuffer, outputTex, fb;
     let fpsHistory = [];
 
     function log(msg) {
@@ -114,19 +118,22 @@
         -1, 1, 1, -1, 1, 1
       ]), gl.STATIC_DRAW);
 
-      fb = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 224, 224, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      outputTex = tex;
 
       return { program: prog, positionBuffer: posBuf };
     }
 
-    function drawToResizeCanvas(gl, sourceTex) {
+    function drawToFramebuffer(sourceImage) {
+      const gl = fbGl;
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.viewport(0, 0, 224, 224);
       gl.useProgram(program);
@@ -141,7 +148,10 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceImage);
+
+      const uTexLoc = gl.getUniformLocation(program, 'u_tex');
+      gl.uniform1i(uTexLoc, 0);
 
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
@@ -161,7 +171,7 @@
       glBinding = new XRWebGLBinding(session, gl);
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
-      const shaderObj = createResizeShader(resizeCtx);
+      const shaderObj = createResizeShader(fbGl);
       program = shaderObj.program;
       positionBuffer = shaderObj.positionBuffer;
 
@@ -179,7 +189,9 @@
 
         const t0 = performance.now();
 
-        drawToResizeCanvas(resizeCtx, cameraTex);
+        drawToFramebuffer(cameraTex);
+        resizeCtx.drawImage(fbCanvas, 0, 0);
+
         processingLock.busy = true;
 
         const input = tf.tidy(() => {
