@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (WebGPU + Shader Resize)</title>
+  <title>AR Real-time Segmentation (WebGPU Optimized)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
@@ -53,109 +53,57 @@
     let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const maskTempCanvas = document.createElement('canvas');
-    maskTempCanvas.width = 224;
-    maskTempCanvas.height = 224;
+    const tempCanvas = new OffscreenCanvas(224, 224);
+    const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
-    const resizeCanvas = document.createElement('canvas');
-    resizeCanvas.width = 224;
-    resizeCanvas.height = 224;
-    const resizeCtx = resizeCanvas.getContext('webgl2');
-    let program, positionBuffer;
     let fpsHistory = [];
+
+    async function loadModel() {
+      try {
+        await tf.setBackend('webgpu');
+        await tf.ready();
+        log('Using WebGPU backend\n');
+      } catch (e) {
+        log('WebGPU init failed, falling back to WebGL...');
+        await tf.setBackend('webgl');
+        await tf.ready();
+        log('Using WebGL backend\n');
+      }
+      try {
+        model = await tf.loadLayersModel('jsModel/model.json');
+        log("Model loaded\n");
+      } catch (e) {
+        log('Model load failed: ' + e.message);
+      }
+    }
 
     function log(msg) {
       document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
-    async function loadModel() {
-      await tf.setBackend('webgpu');
-      await tf.ready();
-      model = await tf.loadLayersModel('jsModel/model.json');
-      log("Model loaded (WebGPU)\n");
-    }
-
-    function createResizeShader(gl) {
-      const vs = `#version 300 es
-        in vec2 position;
-        out vec2 v_uv;
-        void main() {
-          v_uv = (position + 1.0) / 2.0;
-          gl_Position = vec4(position, 0, 1);
-        }`;
-
-      const fs = `#version 300 es
-        precision highp float;
-        in vec2 v_uv;
-        uniform sampler2D u_tex;
-        out vec4 outColor;
-        void main() {
-          outColor = texture(u_tex, v_uv);
-        }`;
-
-      const vShader = gl.createShader(gl.VERTEX_SHADER);
-      gl.shaderSource(vShader, vs);
-      gl.compileShader(vShader);
-
-      const fShader = gl.createShader(gl.FRAGMENT_SHADER);
-      gl.shaderSource(fShader, fs);
-      gl.compileShader(fShader);
-
-      const prog = gl.createProgram();
-      gl.attachShader(prog, vShader);
-      gl.attachShader(prog, fShader);
-      gl.linkProgram(prog);
-
-      const posBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-        -1, -1, 1, -1, -1, 1,
-        -1, 1, 1, -1, 1, 1
-      ]), gl.STATIC_DRAW);
-
-      return { program: prog, positionBuffer: posBuf };
-    }
-
-    function drawToResizeCanvas(sourceTex) {
-      const gl = resizeCtx;
-      gl.viewport(0, 0, 224, 224);
-      gl.useProgram(program);
-      const loc = gl.getAttribLocation(program, 'position');
-      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-
-      const tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceTex);
-
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
-
-    document.getElementById('startBtn').addEventListener('click', async () => {
+    async function startAR() {
       log("Starting AR...");
       await loadModel();
 
       const canvas = document.createElement('canvas');
-      gl = canvas.getContext('webgl2', { xrCompatible: true });
-      session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['camera-access', 'dom-overlay'],
-        domOverlay: { root: document.body }
-      });
+      document.body.appendChild(canvas);
+      gl = canvas.getContext('webgl', { xrCompatible: true });
 
+      try {
+        session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['camera-access', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        });
+      } catch (e) {
+        log('Failed to start AR session: ' + e.message);
+        return;
+      }
+
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       const referenceSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
-      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
-      const shaderObj = createResizeShader(resizeCtx);
-      program = shaderObj.program;
-      positionBuffer = shaderObj.positionBuffer;
-
-      let lastTime = performance.now();
+      let lastFrameTime = performance.now();
 
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
@@ -163,47 +111,67 @@
 
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
+
         const view = pose.views[0];
-        const cameraTex = glBinding.getCameraImage(view.camera);
-        if (!cameraTex) return;
+        const tex = glBinding.getCameraImage(view.camera);
+        if (!tex) return;
 
-        const t0 = performance.now();
-
-        drawToResizeCanvas(cameraTex);
         processingLock.busy = true;
+        const w = view.camera.width;
+        const h = view.camera.height;
 
-        const input = tf.tidy(() => {
-          const image = tf.browser.fromPixels(resizeCanvas);
-          return image.toFloat().div(255).expandDims();
-        });
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-        const t1 = performance.now();
+        const tPreStart = performance.now();
 
-        const prediction = model.predict(input).squeeze();
+        const pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        prediction.data().then(() => {
-          const t2 = performance.now();
-          tf.browser.toPixels(tf.sub(1, prediction), maskTempCanvas).then(() => {
-            const t3 = performance.now();
+        createImageBitmap(imageData).then(bitmap => {
+          tempCtx.drawImage(bitmap, 0, 0, 224, 224);
 
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const tPreEnd = performance.now();
 
-            tf.dispose([input, prediction]);
-            processingLock.busy = false;
+          const prediction = model.predict(input).squeeze();
 
-            const dt = performance.now() - lastTime;
-            lastTime = performance.now();
-            fpsHistory.push(1000 / dt);
-            if (fpsHistory.length > 30) fpsHistory.shift();
-            const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-            log(`Pre: ${(t1 - t0).toFixed(1)}ms\nInfer: ${(t2 - t1).toFixed(1)}ms\nPost: ${(t3 - t2).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+          prediction.data().then(() => {
+            const tPredictEnd = performance.now();
+            tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+              const tPostEnd = performance.now();
+              maskCanvas.width = window.innerWidth;
+              maskCanvas.height = window.innerHeight;
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+
+              tf.dispose([input, prediction]);
+              processingLock.busy = false;
+
+              const now = performance.now();
+              const frameTime = now - lastFrameTime;
+              lastFrameTime = now;
+              fpsHistory.push(1000 / frameTime);
+              if (fpsHistory.length > 30) fpsHistory.shift();
+              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+              log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+            });
           });
         });
       });
 
       document.getElementById('startBtn').style.display = 'none';
+    }
+
+    document.getElementById('startBtn').addEventListener('click', () => {
+      try {
+        startAR();
+      } catch (e) {
+        log('Unexpected error: ' + e.message);
+      }
     });
   </script>
 </body>
