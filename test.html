@@ -3,11 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Max Speed AR Segmentation</title>
+  <title>Fast AR Segmentation</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
   <style>
-    html, body { margin: 0; overflow: hidden; background: black; }
+    body { margin: 0; overflow: hidden; background: black; }
+    #maskCanvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+      pointer-events: none;
+      transform: rotate(180deg) scaleX(-1);
+    }
     #info {
       position: absolute;
       bottom: 10px;
@@ -18,14 +27,7 @@
       font-family: monospace;
       font-size: 12px;
       z-index: 20;
-    }
-    #maskCanvas {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 10;
-      pointer-events: none;
+      white-space: pre-wrap;
     }
     #startBtn {
       position: absolute;
@@ -44,96 +46,103 @@
 <body>
   <button id="startBtn">Start AR</button>
   <canvas id="maskCanvas" width="224" height="224"></canvas>
-  <div id="info">Loading...</div>
+  <div id="info">Status: idle</div>
 
   <script>
-    let model;
+    let model, gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = 224;
-    tempCanvas.height = 224;
+    const tempCanvas = new OffscreenCanvas(224, 224);
     const tempCtx = tempCanvas.getContext('2d');
+    const fpsList = [];
 
-    const imageBuffer = new Uint8ClampedArray(224 * 224 * 4);
-    const maskImageData = new ImageData(imageBuffer, 224, 224);
-    const info = document.getElementById('info');
-
-    let video, stream, lastFrameTime = performance.now(), fpsList = [];
-
-    async function setupModel() {
+    async function loadModel() {
       await tf.setBackend('webgl');
       await tf.ready();
-      model = await tf.loadLayersModel('./jsModel/model.json');
-      info.textContent = 'Model loaded. Click start.';
+      model = await tf.loadGraphModel('./jsModel/model.json'); // можно loadLayersModel, если Sequential
+      document.getElementById('info').textContent = '✅ Model loaded';
     }
 
-    async function startCamera() {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      video = document.createElement('video');
-      video.srcObject = stream;
-      await video.play();
-      video.width = 224;
-      video.height = 224;
-      info.textContent = 'Camera started. Running...';
-      runFrameLoop();
-    }
+    async function startAR() {
+      await loadModel();
 
-    async function runFrameLoop() {
-      const process = async () => {
+      const canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+      gl = canvas.getContext('webgl', { xrCompatible: true });
+
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['camera-access', 'dom-overlay'],
+        domOverlay: { root: document.body }
+      });
+
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+      const refSpace = await session.requestReferenceSpace('local');
+      glBinding = new XRWebGLBinding(session, gl);
+
+      let lastTime = performance.now();
+
+      session.requestAnimationFrame(function onFrame(time, frame) {
+        session.requestAnimationFrame(onFrame);
+        const pose = frame.getViewerPose(refSpace);
+        if (!pose) return;
+
+        const view = pose.views[0];
+        const tex = glBinding.getCameraImage(view.camera);
+        if (!tex) return;
+
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+
         const t0 = performance.now();
 
-        tempCtx.drawImage(video, 0, 0, 224, 224);
-        const input = tf.browser.fromPixels(tempCanvas, 3)
-                                .toFloat()
-                                .div(255)
-                                .expandDims();
+        const w = view.camera.width;
+        const h = view.camera.height;
+        const pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const bitmap = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        await tf.nextFrame();
-        const t1 = performance.now();
+        createImageBitmap(bitmap).then(async img => {
+          tempCtx.drawImage(img, 0, 0, 224, 224);
 
-        const prediction = await model.predict(input);
-        await tf.nextFrame();
-        const t2 = performance.now();
+          const input = tf.browser.fromPixels(tempCanvas, 3)
+                                  .toFloat()
+                                  .div(255)
+                                  .expandDims();
 
-        const data = await prediction.squeeze().data();
-        for (let i = 0; i < data.length; i++) {
-          const v = 255 - (data[i] * 255) | 0;
-          const j = i * 4;
-          imageBuffer[j + 0] = v;
-          imageBuffer[j + 1] = v;
-          imageBuffer[j + 2] = v;
-          imageBuffer[j + 3] = 255;
-        }
-        maskCtx.putImageData(maskImageData, 0, 0);
+          await tf.nextFrame(); // предотвратить GPU block
+          const t1 = performance.now();
 
-        tf.dispose([input, prediction]);
+          const pred = await model.predict(input); // shape [1, 224, 224, 1]
+          await tf.nextFrame();
+          const t2 = performance.now();
 
-        const t3 = performance.now();
-        const now = performance.now();
-        const delta = now - lastFrameTime;
-        lastFrameTime = now;
-        fpsList.push(1000 / delta);
-        if (fpsList.length > 30) fpsList.shift();
-        const avgFps = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;
+          const maskTensor = tf.tidy(() => tf.sub(1, pred.squeeze()));
+          await tf.browser.toPixels(maskTensor, maskCanvas); // GPU -> canvas
+          maskTensor.dispose();
 
-        info.textContent =
-          `Pre: ${(t1 - t0).toFixed(1)}ms | ` +
-          `Infer: ${(t2 - t1).toFixed(1)}ms | ` +
-          `Post: ${(t3 - t2).toFixed(1)}ms | ` +
-          `FPS: ${avgFps.toFixed(1)}`;
+          tf.dispose([input, pred]);
 
-        video.requestVideoFrameCallback(process);
-      };
+          const t3 = performance.now();
+          const now = performance.now();
+          const delta = now - lastTime;
+          lastTime = now;
+          fpsList.push(1000 / delta);
+          if (fpsList.length > 30) fpsList.shift();
+          const avgFps = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;
 
-      video.requestVideoFrameCallback(process);
+          document.getElementById('info').textContent =
+            `Pre: ${(t1 - t0).toFixed(1)}ms | ` +
+            `Infer: ${(t2 - t1).toFixed(1)}ms | ` +
+            `Post: ${(t3 - t2).toFixed(1)}ms | ` +
+            `FPS: ${avgFps.toFixed(1)}`;
+        });
+      });
+
+      document.getElementById('startBtn').style.display = 'none';
     }
 
-    document.getElementById('startBtn').addEventListener('click', async () => {
-      document.getElementById('startBtn').style.display = 'none';
-      await setupModel();
-      await startCamera();
-    });
+    document.getElementById('startBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
