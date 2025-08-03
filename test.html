@@ -70,38 +70,53 @@
     let fpsHistory = [];
 
     async function setupBackend() {
-      if (tf.backend().name !== 'webgpu' && tf.engine().registry['webgpu']) {
-        await tf.setBackend('webgpu');
-        await tf.ready();
-        console.log('Using WebGPU backend');
-      } else {
-        await tf.setBackend('webgl');
-        await tf.ready();
-        console.log('Using WebGL backend');
+      try {
+        if (tf.backend().name !== 'webgpu' && tf.engine().registry['webgpu']) {
+          await tf.setBackend('webgpu');
+          await tf.ready();
+          log('Using WebGPU backend\n');
+        } else {
+          await tf.setBackend('webgl');
+          await tf.ready();
+          log('Using WebGL backend\n');
+        }
+      } catch (e) {
+        log('Backend setup failed: ' + e.message);
       }
     }
 
     async function loadModel() {
-      await setupBackend();
-      model = await tf.loadLayersModel('jsModel/model.json');
-      log("Model loaded\n");
+      try {
+        await setupBackend();
+        model = await tf.loadLayersModel('jsModel/model.json');
+        log("Model loaded\n");
+      } catch (e) {
+        log('Model load failed: ' + e.message);
+      }
     }
 
     function log(msg) {
-      document.getElementById('info').textContent = "Status:\n" + msg;
+      const infoBox = document.getElementById('info');
+      infoBox.textContent = "Status:\n" + msg;
     }
 
     async function startAR() {
+      log("Starting AR...");
       await loadModel();
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false, antialias: false });
 
-      session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['camera-access', 'dom-overlay'],
-        domOverlay: { root: document.body }
-      });
+      try {
+        session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['camera-access', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        });
+      } catch (e) {
+        log('Failed to start AR session: ' + e.message);
+        return;
+      }
 
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       const referenceSpace = await session.requestReferenceSpace('local');
@@ -138,7 +153,6 @@
         const imageData = new ImageData(new Uint8ClampedArray(pixels), cameraWidth, cameraHeight);
         cameraCtx.putImageData(imageData, 0, 0);
 
-        // resize to 224x224
         resizeCtx.drawImage(cameraCanvas, 0, 0, 224, 224);
 
         processingLock.busy = true;
@@ -185,7 +199,13 @@
       document.getElementById('startBtn').style.display = 'none';
     }
 
-    document.getElementById('startBtn').addEventListener('click', startAR);
+    document.getElementById('startBtn').addEventListener('click', () => {
+      try {
+        startAR();
+      } catch (e) {
+        log('Unexpected error: ' + e.message);
+      }
+    });
   </script>
 </body>
 </html>
