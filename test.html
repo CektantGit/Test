@@ -141,7 +141,7 @@
 
         processingLock.busy = true;
 
-        const input = tf.tidy(() => tf.browser.fromPixels(resizeCanvas).toFloat().div(255).expandDims());
+        const input = tf.tidy(() => tf.browser.fromPixels(resizeCanvas, 3).toFloat().div(255).expandDims());
         const tPreEnd = performance.now();
 
         const prediction = model.predict(input).squeeze();
