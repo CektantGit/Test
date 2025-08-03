@@ -85,11 +85,26 @@
       document.getElementById('startARBtn').style.display = 'none';
     }
 
-    async function processCameraFrame() {
+    async function processCameraFrame(view) {
       if (processing) return;
       processing = true;
       try {
-        const canvas = renderer.domElement;
+        const baseLayer = session.renderState.baseLayer;
+        const width = baseLayer.framebufferWidth;
+        const height = baseLayer.framebufferHeight;
+
+        const pixels = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+
+        const imageData = ctx.createImageData(width, height);
+        imageData.data.set(pixels);
+        ctx.putImageData(imageData, 0, 0);
+
         const input = tf.browser.fromPixels(canvas, 3).div(255);
         const resized = tf.image.resizeBilinear(input, [224, 224]).expandDims();
         const pred = await model.predict(resized);
@@ -104,7 +119,6 @@
           output.data[i * 4 + 3] = 255;
         }
         maskCtx.putImageData(output, 0, 0);
-
       } catch (e) {
         log("Error: " + e.message);
       } finally {
@@ -130,7 +144,7 @@
       renderer.render(scene, camera);
 
       if (running && !processing) {
-        processCameraFrame();
+        processCameraFrame(view);
       }
     }
 
