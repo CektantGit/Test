@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation</title>
+  <title>AR Real-time Segmentation (Fast Optimized)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
     body { margin: 0; overflow: hidden; }
@@ -48,12 +48,13 @@
 
   <script>
     let model;
-    let gl, session, glBinding, renderer;
+    let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-    let processing = false;
+    const maskTempCanvas = document.createElement('canvas');
+    maskTempCanvas.width = 224;
+    maskTempCanvas.height = 224;
+    const processingLock = { busy: false };
 
     async function loadModel() {
       model = await tf.loadLayersModel('jsModel/model.json');
@@ -69,7 +70,7 @@
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true });
+      gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false, antialias: false });
 
       session = await navigator.xr.requestSession('immersive-ar', {
         requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -80,9 +81,9 @@
       const referenceSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
 
-      const onFrame = (time, frame) => {
+      session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
-        if (processing) return;
+        if (processingLock.busy) return;
 
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
@@ -94,50 +95,40 @@
         const width = view.camera.width;
         const height = view.camera.height;
 
-        const tempFB = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, tempFB);
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cameraTexture, 0);
 
         const pixels = new Uint8Array(width * height * 4);
         gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-        const imageData = new ImageData(new Uint8ClampedArray(pixels), width, height);
-        tempCanvas.width = width;
-        tempCanvas.height = height;
-        tempCtx.putImageData(imageData, 0, 0);
+        processingLock.busy = true;
 
-        processing = true;
+        tf.nextFrame().then(() => {
+          const input = tf.tidy(() => {
+            return tf.tensor(pixels, [height, width, 4], 'int32')
+              .slice([0, 0, 0], [-1, -1, 3])
+              .resizeBilinear([224, 224])
+              .div(255)
+              .expandDims();
+          });
 
-        const input = tf.tidy(() => {
-          return tf.browser.fromPixels(tempCanvas, 3)
-            .resizeBilinear([224, 224])
-            .div(255)
-            .expandDims();
+          const prediction = model.predict(input).squeeze();
+
+          tf.browser.toPixels(tf.sub(1, prediction), maskTempCanvas).then(() => {
+            maskCanvas.width = window.innerWidth;
+            maskCanvas.height = window.innerHeight;
+            maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+            tf.dispose([input, prediction]);
+            processingLock.busy = false;
+          }).catch(e => {
+            log("Error: " + e.message);
+            tf.dispose([input, prediction]);
+            processingLock.busy = false;
+          });
         });
+      });
 
-        model.predict(input).data().then(async pred => {
-          const maskTensor = tf.tensor(pred).reshape([224, 224]).mul(255).cast('int32');
-          const maskTempCanvas = document.createElement('canvas');
-          maskTempCanvas.width = 224;
-          maskTempCanvas.height = 224;
-          await tf.browser.toPixels(maskTensor, maskTempCanvas);
-
-          maskCanvas.width = window.innerWidth;
-          maskCanvas.height = window.innerHeight;
-          maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-          maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-
-          maskTensor.dispose();
-          tf.dispose(input);
-          processing = false;
-        }).catch(e => {
-          log("Error: " + e.message);
-          tf.dispose(input);
-          processing = false;
-        });
-      };
-
-      session.requestAnimationFrame(onFrame);
       document.getElementById('startBtn').style.display = 'none';
     }
 
