@@ -59,7 +59,7 @@
     async function loadModel() {
       await tf.setBackend('webgl');
       await tf.ready();
-      model = await tf.loadGraphModel('./jsModel/model.json'); // можно loadLayersModel, если Sequential
+      model = await tf.loadLayersModel('./jsModel/model.json');
       document.getElementById('info').textContent = '✅ Model loaded';
     }
 
@@ -100,28 +100,24 @@
         const h = view.camera.height;
         const pixels = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-        const bitmap = new ImageData(new Uint8ClampedArray(pixels), w, h);
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        createImageBitmap(bitmap).then(async img => {
+        createImageBitmap(imageData).then(async img => {
+          tempCtx.clearRect(0, 0, 224, 224);
           tempCtx.drawImage(img, 0, 0, 224, 224);
 
-          const input = tf.browser.fromPixels(tempCanvas, 3)
-                                  .toFloat()
-                                  .div(255)
-                                  .expandDims();
-
-          await tf.nextFrame(); // предотвратить GPU block
+          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          await tf.nextFrame();
           const t1 = performance.now();
 
-          const pred = await model.predict(input); // shape [1, 224, 224, 1]
+          const prediction = await model.predict(input);
           await tf.nextFrame();
           const t2 = performance.now();
 
-          const maskTensor = tf.tidy(() => tf.sub(1, pred.squeeze()));
-          await tf.browser.toPixels(maskTensor, maskCanvas); // GPU -> canvas
-          maskTensor.dispose();
-
-          tf.dispose([input, pred]);
+          const mask = tf.tidy(() => tf.sub(1, prediction.squeeze()).clipByValue(0, 1));
+          await tf.browser.toPixels(mask, maskCanvas);
+          mask.dispose();
+          tf.dispose([input, prediction]);
 
           const t3 = performance.now();
           const now = performance.now();
@@ -142,7 +138,16 @@
       document.getElementById('startBtn').style.display = 'none';
     }
 
-    document.getElementById('startBtn').addEventListener('click', startAR);
+    document.getElementById('startBtn').addEventListener('click', () => {
+      if (!navigator.xr) {
+        alert('WebXR is not supported on this device/browser');
+        return;
+      }
+      startAR().catch(err => {
+        document.getElementById('info').textContent = '❌ Error: ' + err.message;
+        console.error(err);
+      });
+    });
   </script>
 </body>
 </html>
