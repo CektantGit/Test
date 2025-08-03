@@ -15,7 +15,7 @@
       height: 100vh;
       z-index: 10;
       pointer-events: none;
-      transform: rotate(180deg) scaleX(-1);
+      transform: scaleX(-1);
     }
     #info {
       position: absolute;
@@ -54,11 +54,8 @@
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = 224;
-    tempCanvas.height = 224;
     const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
-
     let fpsHistory = [];
 
     async function loadModel() {
@@ -81,8 +78,7 @@
     }
 
     function log(msg) {
-      const infoBox = document.getElementById('info');
-      infoBox.textContent = "Status:\n" + msg;
+      document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
     async function startAR() {
@@ -123,6 +119,8 @@
 
         const w = view.camera.width;
         const h = view.camera.height;
+        tempCanvas.width = w;
+        tempCanvas.height = h;
 
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
@@ -135,7 +133,7 @@
         const imgData = new ImageData(new Uint8ClampedArray(pixels), w, h);
         tempCtx.putImageData(imgData, 0, 0);
 
-        const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas, 3).resizeBilinear([224, 224]).toFloat().div(255).expandDims());
+        const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).resizeBilinear([224, 224]).toFloat().div(255).expandDims());
         const tPreEnd = performance.now();
 
         const prediction = model.predict(input).squeeze();
@@ -148,6 +146,7 @@
 
             maskCanvas.width = window.innerWidth;
             maskCanvas.height = window.innerHeight;
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
             maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
             tf.dispose([input, prediction]);
