@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (WebGPU Full Pipeline)</title>
+  <title>AR Real-time Segmentation (WebGL Shader Resize)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
@@ -48,9 +48,11 @@
   <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
 
-  <script>
+  <script type="module">
+    import { createShaderPipeline } from './resize-shader.js';
+
     let model;
-    let gl, session, glBinding;
+    let gl, session, glBinding, shaderPipeline;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     const processingLock = { busy: false };
@@ -85,7 +87,8 @@
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true });
+      gl = canvas.getContext('webgl2', { xrCompatible: true });
+      shaderPipeline = await createShaderPipeline(gl);
 
       try {
         session = await navigator.xr.requestSession('immersive-ar', {
@@ -115,40 +118,24 @@
         if (!tex) return;
 
         processingLock.busy = true;
-        const w = view.camera.width;
-        const h = view.camera.height;
-
-        const fb = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
         const tPreStart = performance.now();
 
-        const readPixelsBuf = new Uint8Array(w * h * 4);
-        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, readPixelsBuf);
+        const resized = shaderPipeline.resize(tex, view.camera.width, view.camera.height);
+        const input = tf.tidy(() => tf.browser.fromPixels(resized).toFloat().div(255).expandDims());
 
-        const imgData = new ImageData(new Uint8ClampedArray(readPixelsBuf), w, h);
-        const sourceCanvas = new OffscreenCanvas(w, h);
-        const sourceCtx = sourceCanvas.getContext('2d');
-        sourceCtx.putImageData(imgData, 0, 0);
-
-        const resizeCanvas = new OffscreenCanvas(224, 224);
-        const resizeCtx = resizeCanvas.getContext('2d');
-        resizeCtx.drawImage(sourceCanvas, 0, 0, w, h, 0, 0, 224, 224);
-
-        const input = tf.tidy(() => tf.browser.fromPixels(resizeCanvas).toFloat().div(255).expandDims());
         const tPreEnd = performance.now();
 
         const prediction = model.predict(input).squeeze();
 
         prediction.data().then(() => {
           const tPredictEnd = performance.now();
-          tf.browser.toPixels(tf.sub(1, prediction), resizeCanvas).then(() => {
+          tf.browser.toPixels(tf.sub(1, prediction), resized).then(() => {
             const tPostEnd = performance.now();
             maskCanvas.width = window.innerWidth;
             maskCanvas.height = window.innerHeight;
             maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            maskCtx.drawImage(resizeCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+            maskCtx.drawImage(resized.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
 
             tf.dispose([input, prediction]);
             processingLock.busy = false;
