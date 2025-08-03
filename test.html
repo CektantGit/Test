@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (Optimized Input)</title>
+  <title>AR Real-time Segmentation (Max Speed)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     #maskCanvas {
@@ -50,38 +50,28 @@
   <div id="info">Status: idle</div>
 
   <script>
-    let model;
-    let gl, session, glBinding;
+    let model, gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const maskTempCanvas = document.createElement('canvas');
-    maskTempCanvas.width = 224;
-    maskTempCanvas.height = 224;
-    const processingLock = { busy: false };
-
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 224;
+    tempCanvas.height = 224;
+    const tempCtx = tempCanvas.getContext('2d');
     const cameraCanvas = document.createElement('canvas');
     const cameraCtx = cameraCanvas.getContext('2d');
 
-    const resizeCanvas = document.createElement('canvas');
-    resizeCanvas.width = 224;
-    resizeCanvas.height = 224;
-    const resizeCtx = resizeCanvas.getContext('2d');
-
+    const lock = { busy: false };
     let fpsHistory = [];
 
     async function setupBackend() {
       try {
-        if (tf.backend().name !== 'webgpu' && tf.engine().registry['webgpu']) {
-          await tf.setBackend('webgpu');
-          await tf.ready();
-          log('Using WebGPU backend\n');
-        } else {
-          await tf.setBackend('webgl');
-          await tf.ready();
-          log('Using WebGL backend\n');
-        }
+        await tf.setBackend('webgpu');
+        await tf.ready();
+        log('Using WebGPU backend');
       } catch (e) {
-        log('Backend setup failed: ' + e.message);
+        await tf.setBackend('webgl');
+        await tf.ready();
+        log('Fallback to WebGL backend');
       }
     }
 
@@ -89,24 +79,22 @@
       try {
         await setupBackend();
         model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded\n");
+        log("Model loaded");
       } catch (e) {
-        log('Model load failed: ' + e.message);
+        log('Model load error: ' + e.message);
       }
     }
 
     function log(msg) {
-      const infoBox = document.getElementById('info');
-      infoBox.textContent = "Status:\n" + msg;
+      document.getElementById('info').textContent = 'Status:\n' + msg;
     }
 
     async function startAR() {
-      log("Starting AR...");
       await loadModel();
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false, antialias: false });
+      gl = canvas.getContext('webgl', { xrCompatible: true });
 
       try {
         session = await navigator.xr.requestSession('immersive-ar', {
@@ -114,84 +102,78 @@
           domOverlay: { root: document.body }
         });
       } catch (e) {
-        log('Failed to start AR session: ' + e.message);
+        log('AR Session error: ' + e.message);
         return;
       }
 
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-      const referenceSpace = await session.requestReferenceSpace('local');
+      const refSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
-
-      let lastFrameTime = performance.now();
+      let lastTime = performance.now();
 
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
-        if (processingLock.busy) return;
+        if (lock.busy) return;
 
-        const pose = frame.getViewerPose(referenceSpace);
+        const pose = frame.getViewerPose(refSpace);
         if (!pose) return;
 
         const view = pose.views[0];
-        const cameraTexture = glBinding.getCameraImage(view.camera);
-        if (!cameraTexture) return;
+        const tex = glBinding.getCameraImage(view.camera);
+        if (!tex) return;
 
-        const cameraWidth = view.camera.width;
-        const cameraHeight = view.camera.height;
+        const w = view.camera.width;
+        const h = view.camera.height;
 
-        if (cameraCanvas.width !== cameraWidth || cameraCanvas.height !== cameraHeight) {
-          cameraCanvas.width = cameraWidth;
-          cameraCanvas.height = cameraHeight;
+        if (cameraCanvas.width !== w) {
+          cameraCanvas.width = w;
+          cameraCanvas.height = h;
         }
 
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cameraTexture, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-        const pixels = new Uint8Array(cameraWidth * cameraHeight * 4);
-        gl.readPixels(0, 0, cameraWidth, cameraHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-        const imageData = new ImageData(new Uint8ClampedArray(pixels), cameraWidth, cameraHeight);
-        cameraCtx.putImageData(imageData, 0, 0);
+        const imgData = new ImageData(new Uint8ClampedArray(pixels), w, h);
+        cameraCtx.putImageData(imgData, 0, 0);
 
-        resizeCtx.drawImage(cameraCanvas, 0, 0, 224, 224);
-
-        processingLock.busy = true;
+        lock.busy = true;
         const t0 = performance.now();
 
         tf.nextFrame().then(() => {
           const t1 = performance.now();
 
-          const input = tf.tidy(() => {
-            const image = tf.browser.fromPixels(resizeCanvas);
-            return image.toFloat().div(255).expandDims();
-          });
+          const input = tf.tidy(() =>
+            tf.browser.fromPixels(cameraCanvas)
+              .resizeBilinear([224, 224])
+              .toFloat()
+              .div(255)
+              .expandDims()
+          );
 
           const t2 = performance.now();
 
           const prediction = model.predict(input).squeeze();
 
-          prediction.data().then(() => {
+          tf.browser.toPixels(prediction.neg().add(1), tempCanvas).then(() => {
             const t3 = performance.now();
+            maskCanvas.width = window.innerWidth;
+            maskCanvas.height = window.innerHeight;
+            maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-            tf.browser.toPixels(tf.sub(1, prediction), maskTempCanvas).then(() => {
-              const t4 = performance.now();
+            tf.dispose([input, prediction]);
+            lock.busy = false;
 
-              maskCanvas.width = window.innerWidth;
-              maskCanvas.height = window.innerHeight;
-              maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+            const dt = performance.now() - lastTime;
+            lastTime = performance.now();
+            fpsHistory.push(1000 / dt);
+            if (fpsHistory.length > 30) fpsHistory.shift();
+            const fps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-              tf.dispose([input, prediction]);
-              processingLock.busy = false;
-
-              const now = performance.now();
-              const frameTime = now - lastFrameTime;
-              lastFrameTime = now;
-              fpsHistory.push(1000 / frameTime);
-              if (fpsHistory.length > 30) fpsHistory.shift();
-              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-              log(`Preprocess: ${(t2 - t1).toFixed(1)} ms\nPredict: ${(t3 - t2).toFixed(1)} ms\nPostprocess: ${(t4 - t3).toFixed(1)} ms\nFPS: ${avgFps.toFixed(1)}`);
-            });
+            log(`Pre: ${(t2 - t1).toFixed(1)}ms\nPred: ${(t3 - t2).toFixed(1)}ms\nFPS: ${fps.toFixed(1)}`);
           });
         });
       });
@@ -199,13 +181,7 @@
       document.getElementById('startBtn').style.display = 'none';
     }
 
-    document.getElementById('startBtn').addEventListener('click', () => {
-      try {
-        startAR();
-      } catch (e) {
-        log('Unexpected error: ' + e.message);
-      }
-    });
+    document.getElementById('startBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
