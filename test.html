@@ -116,8 +116,7 @@
       return { program: prog, positionBuffer: posBuf };
     }
 
-    function drawToResizeCanvas(sourceTex) {
-      const gl = resizeCtx;
+    function drawToResizeCanvas(gl, sourceTex) {
       gl.viewport(0, 0, 224, 224);
       gl.useProgram(program);
       const loc = gl.getAttribLocation(program, 'position');
@@ -169,7 +168,7 @@
 
         const t0 = performance.now();
 
-        drawToResizeCanvas(cameraTex);
+        drawToResizeCanvas(resizeCtx, cameraTex);
         processingLock.busy = true;
 
         const input = tf.tidy(() => {
