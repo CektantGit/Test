@@ -108,7 +108,6 @@
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
         if (processingLock.busy) return;
-        processingLock.busy = true;
 
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
@@ -117,10 +116,11 @@
         const tex = glBinding.getCameraImage(view.camera);
         if (!tex) return;
 
+        processingLock.busy = true;
         const w = view.camera.width;
         const h = view.camera.height;
-        tempCanvas.width = w;
-        tempCanvas.height = h;
+        tempCanvas.width = 224;
+        tempCanvas.height = 224;
 
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
@@ -130,36 +130,36 @@
 
         const pixels = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-        const imgData = new ImageData(new Uint8ClampedArray(pixels), w, h);
-        tempCtx.putImageData(imgData, 0, 0);
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).resizeBilinear([224, 224]).toFloat().div(255).expandDims());
-        const tPreEnd = performance.now();
+        createImageBitmap(imageData).then(bitmap => {
+          tempCtx.drawImage(bitmap, 0, 0, 224, 224);
+          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const tPreEnd = performance.now();
 
-        const prediction = model.predict(input).squeeze();
+          const prediction = model.predict(input).squeeze();
 
-        prediction.data().then(() => {
-          const tPredictEnd = performance.now();
+          prediction.data().then(() => {
+            const tPredictEnd = performance.now();
+            tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+              const tPostEnd = performance.now();
+              maskCanvas.width = window.innerWidth;
+              maskCanvas.height = window.innerHeight;
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-          tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-            const tPostEnd = performance.now();
+              tf.dispose([input, prediction]);
+              processingLock.busy = false;
 
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+              const now = performance.now();
+              const frameTime = now - lastFrameTime;
+              lastFrameTime = now;
+              fpsHistory.push(1000 / frameTime);
+              if (fpsHistory.length > 30) fpsHistory.shift();
+              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-            tf.dispose([input, prediction]);
-            processingLock.busy = false;
-
-            const now = performance.now();
-            const frameTime = now - lastFrameTime;
-            lastFrameTime = now;
-            fpsHistory.push(1000 / frameTime);
-            if (fpsHistory.length > 30) fpsHistory.shift();
-            const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-            log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+              log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+            });
           });
         });
       });
