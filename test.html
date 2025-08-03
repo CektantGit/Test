@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AR Real-time Segmentation (Optimized Input)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     #maskCanvas {
@@ -57,9 +59,30 @@
     maskTempCanvas.height = 224;
     const processingLock = { busy: false };
 
+    const cameraCanvas = document.createElement('canvas');
+    const cameraCtx = cameraCanvas.getContext('2d');
+
+    const resizeCanvas = document.createElement('canvas');
+    resizeCanvas.width = 224;
+    resizeCanvas.height = 224;
+    const resizeCtx = resizeCanvas.getContext('2d');
+
     let fpsHistory = [];
 
+    async function setupBackend() {
+      if (tf.backend().name !== 'webgpu' && tf.engine().registry['webgpu']) {
+        await tf.setBackend('webgpu');
+        await tf.ready();
+        console.log('Using WebGPU backend');
+      } else {
+        await tf.setBackend('webgl');
+        await tf.ready();
+        console.log('Using WebGL backend');
+      }
+    }
+
     async function loadModel() {
+      await setupBackend();
       model = await tf.loadLayersModel('jsModel/model.json');
       log("Model loaded\n");
     }
@@ -86,11 +109,6 @@
 
       let lastFrameTime = performance.now();
 
-      const resizeCanvas = document.createElement('canvas');
-      resizeCanvas.width = 224;
-      resizeCanvas.height = 224;
-      const resizeCtx = resizeCanvas.getContext('2d');
-
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
         if (processingLock.busy) return;
@@ -105,10 +123,10 @@
         const cameraWidth = view.camera.width;
         const cameraHeight = view.camera.height;
 
-        const cameraCanvas = document.createElement('canvas');
-        cameraCanvas.width = cameraWidth;
-        cameraCanvas.height = cameraHeight;
-        const cameraCtx = cameraCanvas.getContext('2d');
+        if (cameraCanvas.width !== cameraWidth || cameraCanvas.height !== cameraHeight) {
+          cameraCanvas.width = cameraWidth;
+          cameraCanvas.height = cameraHeight;
+        }
 
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
