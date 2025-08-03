@@ -82,7 +82,7 @@
 
       const onFrame = (time, frame) => {
         session.requestAnimationFrame(onFrame);
-        if (processing) return; // строго игнорировать, если в процессе
+        if (processing) return;
 
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
@@ -115,19 +115,19 @@
             .expandDims();
         });
 
-        model.predict(input).data().then(pred => {
-          const maskImageData = maskCtx.createImageData(224, 224);
-          for (let i = 0; i < 224 * 224; i++) {
-            const val = (1 - pred[i]) * 255;
-            maskImageData.data[i * 4 + 0] = val;
-            maskImageData.data[i * 4 + 1] = val;
-            maskImageData.data[i * 4 + 2] = val;
-            maskImageData.data[i * 4 + 3] = val;
-          }
+        model.predict(input).data().then(async pred => {
+          const maskTensor = tf.tensor(pred).reshape([224, 224]).mul(255).cast('int32');
+          const maskTempCanvas = document.createElement('canvas');
+          maskTempCanvas.width = 224;
+          maskTempCanvas.height = 224;
+          await tf.browser.toPixels(maskTensor, maskTempCanvas);
+
           maskCanvas.width = window.innerWidth;
           maskCanvas.height = window.innerHeight;
           maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-          maskCtx.putImageData(maskImageData, 0, 0);
+          maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+
+          maskTensor.dispose();
           tf.dispose(input);
           processing = false;
         }).catch(e => {
