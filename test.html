@@ -86,6 +86,11 @@
 
       let lastFrameTime = performance.now();
 
+      const resizeCanvas = document.createElement('canvas');
+      resizeCanvas.width = 224;
+      resizeCanvas.height = 224;
+      const resizeCtx = resizeCanvas.getContext('2d');
+
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
         if (processingLock.busy) return;
@@ -97,14 +102,26 @@
         const cameraTexture = glBinding.getCameraImage(view.camera);
         if (!cameraTexture) return;
 
+        const cameraWidth = view.camera.width;
+        const cameraHeight = view.camera.height;
+
+        const cameraCanvas = document.createElement('canvas');
+        cameraCanvas.width = cameraWidth;
+        cameraCanvas.height = cameraHeight;
+        const cameraCtx = cameraCanvas.getContext('2d');
+
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cameraTexture, 0);
 
-        const width = 224;
-        const height = 224;
-        const pixels = new Uint8Array(width * height * 4);
-        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const pixels = new Uint8Array(cameraWidth * cameraHeight * 4);
+        gl.readPixels(0, 0, cameraWidth, cameraHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), cameraWidth, cameraHeight);
+        cameraCtx.putImageData(imageData, 0, 0);
+
+        // resize to 224x224
+        resizeCtx.drawImage(cameraCanvas, 0, 0, 224, 224);
 
         processingLock.busy = true;
         const t0 = performance.now();
@@ -113,9 +130,8 @@
           const t1 = performance.now();
 
           const input = tf.tidy(() => {
-            const rgba = tf.tensor(pixels, [height, width, 4], 'int32');
-            const rgb = rgba.slice([0, 0, 0], [-1, -1, 3]);
-            return rgb.div(255.0).expandDims();
+            const image = tf.browser.fromPixels(resizeCanvas);
+            return image.toFloat().div(255).expandDims();
           });
 
           const t2 = performance.now();
