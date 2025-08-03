@@ -82,12 +82,14 @@
 
       const onFrame = (time, frame) => {
         session.requestAnimationFrame(onFrame);
+        if (processing) return; // строго игнорировать, если в процессе
+
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
 
         const view = pose.views[0];
         const cameraTexture = glBinding.getCameraImage(view.camera);
-        if (!cameraTexture || processing) return;
+        if (!cameraTexture) return;
 
         const width = view.camera.width;
         const height = view.camera.height;
