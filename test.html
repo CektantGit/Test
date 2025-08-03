@@ -126,7 +126,7 @@
         const resized = tf.image.resizeBilinear(img, [224, 224]).expandDims();
 
         const pred = await model.predict(resized);
-        const arr = pred.dataSync();
+        const arr = await pred.data();
 
         const maskCanvas = document.getElementById('maskCanvas');
         const maskCtx = maskCanvas.getContext('2d');
@@ -165,15 +165,15 @@
 
       renderer.render(scene, camera);
 
-      if (running) processCameraFrame(view);
+      if (running && !processing) {
+        processCameraFrame(view);
+      }
     }
 
     document.getElementById('startARBtn').addEventListener('click', startAR);
     document.getElementById('captureButton').addEventListener('click', () => {
-      if (!running) {
-        log("Capture started.");
-        running = true;
-      }
+      running = true;
+      log("Capture started.");
     });
   </script>
 </body>
