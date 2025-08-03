@@ -69,25 +69,17 @@
 
     let fpsHistory = [];
 
-    async function setupBackend() {
-      try {
-        if (tf.backend().name !== 'webgpu' && tf.engine().registry['webgpu']) {
-          await tf.setBackend('webgpu');
-          await tf.ready();
-          log('Using WebGPU backend\n');
-        } else {
-          await tf.setBackend('webgl');
-          await tf.ready();
-          log('Using WebGL backend\n');
-        }
-      } catch (e) {
-        log('Backend setup failed: ' + e.message);
-      }
-    }
-
     async function loadModel() {
       try {
-        await setupBackend();
+        await tf.setBackend('webgpu');
+        await tf.ready();
+        log('Using WebGPU backend\n');
+      } catch (e) {
+        await tf.setBackend('webgl');
+        await tf.ready();
+        log('WebGPU unavailable, using WebGL\n');
+      }
+      try {
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded\n");
       } catch (e) {
