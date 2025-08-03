@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (WebGPU + WebGL Resize)</title>
+  <title>AR Real-time Segmentation (WebGPU Optimized)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
@@ -15,7 +15,7 @@
       height: 100vh;
       z-index: 10;
       pointer-events: none;
-      transform: scaleX(-1);
+      transform: rotate(180deg) scaleX(-1);
     }
     #info {
       position: absolute;
@@ -53,9 +53,7 @@
     let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = 224;
-    tempCanvas.height = 224;
+    const tempCanvas = new OffscreenCanvas(224, 224);
     const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
     let fpsHistory = [];
@@ -133,7 +131,6 @@
         const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
         createImageBitmap(imageData).then(bitmap => {
-          tempCtx.clearRect(0, 0, 224, 224);
           tempCtx.drawImage(bitmap, 0, 0, 224, 224);
 
           const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
@@ -148,7 +145,7 @@
               maskCanvas.width = window.innerWidth;
               maskCanvas.height = window.innerHeight;
               maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
 
               tf.dispose([input, prediction]);
               processingLock.busy = false;
