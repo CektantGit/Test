@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AR Segmentation with Timing</title>
+  <title>AR Segmentation with Fast Postprocess</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
   <style>
@@ -121,23 +121,24 @@
         createImageBitmap(imageData).then(async bitmap => {
           tempCtx.drawImage(bitmap, 0, 0, 224, 224);
 
-          const input = tf.browser.fromPixels(tempCanvas)
+          const input = tf.browser.fromPixels(tempCanvas, 3)
                                   .resizeBilinear([224, 224])
                                   .div(255.0)
                                   .expandDims();
 
-          const tPreEnd = performance.now();
-
-          await tf.nextFrame(); // важно для избежания pipeline lock
+          await tf.nextFrame();
 
           const tInferStart = performance.now();
-          const prediction = await model.predict(input); // без .data()
+          const prediction = await model.predict(input);
           await tf.nextFrame();
           const tInferEnd = performance.now();
 
           const tPostStart = performance.now();
 
-          await tf.browser.toPixels(tf.sub(1, prediction.squeeze()), tempCanvas);
+          const predictionProcessed = tf.tidy(() => prediction.squeeze().mul(-1).add(1)); // 1 - mask
+          await tf.browser.toPixels(predictionProcessed, tempCanvas);
+          predictionProcessed.dispose();
+
           const tPostEnd = performance.now();
 
           maskCanvas.width = window.innerWidth;
@@ -156,7 +157,7 @@
           const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
           log(
-            `Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\n` +
+            `Pre: ${(tInferStart - tPreStart).toFixed(1)}ms\n` +
             `Infer: ${(tInferEnd - tInferStart).toFixed(1)}ms\n` +
             `Post: ${(tPostEnd - tPostStart).toFixed(1)}ms\n` +
             `FPS: ${avgFps.toFixed(1)}`
