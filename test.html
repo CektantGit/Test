@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (WebGPU Optimized)</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AR Segmentation Fast Inference</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     #maskCanvas {
@@ -59,22 +59,12 @@
     let fpsHistory = [];
 
     async function loadModel() {
-      try {
-        await tf.setBackend('webgpu');
-        await tf.ready();
-        log('Using WebGPU backend\n');
-      } catch (e) {
-        log('WebGPU init failed, falling back to WebGL...');
-        await tf.setBackend('webgl');
-        await tf.ready();
-        log('Using WebGL backend\n');
-      }
-      try {
-        model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded\n");
-      } catch (e) {
-        log('Model load failed: ' + e.message);
-      }
+      await tf.setBackend('webgl'); // ✅ быстро работает с AR WebGL
+      await tf.ready();
+      log('Using WebGL backend\n');
+
+      model = await tf.loadLayersModel('jsModel/model.json');
+      log("Model loaded\n");
     }
 
     function log(msg) {
@@ -132,16 +122,18 @@
 
         createImageBitmap(imageData).then(bitmap => {
           tempCtx.drawImage(bitmap, 0, 0, 224, 224);
-
-          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const input = tf.tidy(() =>
+            tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims()
+          );
           const tPreEnd = performance.now();
 
           const prediction = model.predict(input).squeeze();
-
           prediction.data().then(() => {
             const tPredictEnd = performance.now();
+
             tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
               const tPostEnd = performance.now();
+
               maskCanvas.width = window.innerWidth;
               maskCanvas.height = window.innerHeight;
               maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
