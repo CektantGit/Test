@@ -26,6 +26,7 @@
       font-family: monospace;
       font-size: 12px;
       z-index: 20;
+      white-space: pre-wrap;
     }
     #startBtn {
       position: absolute;
@@ -56,13 +57,15 @@
     maskTempCanvas.height = 224;
     const processingLock = { busy: false };
 
+    let fpsHistory = [];
+
     async function loadModel() {
       model = await tf.loadLayersModel('jsModel/model.json');
-      log("Model loaded");
+      log("Model loaded\n");
     }
 
     function log(msg) {
-      document.getElementById('info').textContent = "Status: " + msg;
+      document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
     async function startAR() {
@@ -80,6 +83,8 @@
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       const referenceSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
+
+      let lastFrameTime = performance.now();
 
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
@@ -104,7 +109,10 @@
 
         processingLock.busy = true;
 
+        const t0 = performance.now();
         tf.nextFrame().then(() => {
+          const t1 = performance.now();
+
           const input = tf.tidy(() => {
             return tf.tensor(pixels, [height, width, 4], 'int32')
               .slice([0, 0, 0], [-1, -1, 3])
@@ -113,18 +121,32 @@
               .expandDims();
           });
 
+          const t2 = performance.now();
+
           const prediction = model.predict(input).squeeze();
 
-          tf.browser.toPixels(tf.sub(1, prediction), maskTempCanvas).then(() => {
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-            tf.dispose([input, prediction]);
-            processingLock.busy = false;
-          }).catch(e => {
-            log("Error: " + e.message);
-            tf.dispose([input, prediction]);
-            processingLock.busy = false;
+          prediction.data().then(() => {
+            const t3 = performance.now();
+
+            tf.browser.toPixels(tf.sub(1, prediction), maskTempCanvas).then(() => {
+              const t4 = performance.now();
+
+              maskCanvas.width = window.innerWidth;
+              maskCanvas.height = window.innerHeight;
+              maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+
+              tf.dispose([input, prediction]);
+              processingLock.busy = false;
+
+              const now = performance.now();
+              const frameTime = now - lastFrameTime;
+              lastFrameTime = now;
+              fpsHistory.push(1000 / frameTime);
+              if (fpsHistory.length > 30) fpsHistory.shift();
+              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+              log(`Preprocess: ${(t2 - t1).toFixed(1)} ms\nPredict: ${(t3 - t2).toFixed(1)} ms\nPostprocess: ${(t4 - t3).toFixed(1)} ms\nFPS: ${avgFps.toFixed(1)}`);
+            });
           });
         });
       });
