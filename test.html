@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (Optimized Input)</title>
+  <title>AR Real-time Segmentation (WebGPU + WebGL Resize)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
     body { margin: 0; overflow: hidden; }
@@ -16,7 +15,7 @@
       height: 100vh;
       z-index: 10;
       pointer-events: none;
-      transform: rotate(180deg) scaleX(-1);
+      transform: scaleX(-1);
     }
     #info {
       position: absolute;
@@ -54,19 +53,11 @@
     let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const maskTempCanvas = document.createElement('canvas');
-    maskTempCanvas.width = 224;
-    maskTempCanvas.height = 224;
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 224;
+    tempCanvas.height = 224;
+    const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
-
-    const cameraCanvas = document.createElement('canvas');
-    const cameraCtx = cameraCanvas.getContext('2d');
-
-    const resizeCanvas = document.createElement('canvas');
-    resizeCanvas.width = 224;
-    resizeCanvas.height = 224;
-    const resizeCtx = resizeCanvas.getContext('2d');
-
     let fpsHistory = [];
 
     async function loadModel() {
@@ -75,9 +66,10 @@
         await tf.ready();
         log('Using WebGPU backend\n');
       } catch (e) {
+        log('WebGPU init failed, falling back to WebGL...');
         await tf.setBackend('webgl');
         await tf.ready();
-        log('WebGPU unavailable, using WebGL\n');
+        log('Using WebGL backend\n');
       }
       try {
         model = await tf.loadLayersModel('jsModel/model.json');
@@ -88,8 +80,7 @@
     }
 
     function log(msg) {
-      const infoBox = document.getElementById('info');
-      infoBox.textContent = "Status:\n" + msg;
+      document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
     async function startAR() {
@@ -98,7 +89,7 @@
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false, antialias: false });
+      gl = canvas.getContext('webgl', { xrCompatible: true });
 
       try {
         session = await navigator.xr.requestSession('immersive-ar', {
@@ -124,63 +115,53 @@
         if (!pose) return;
 
         const view = pose.views[0];
-        const cameraTexture = glBinding.getCameraImage(view.camera);
-        if (!cameraTexture) return;
+        const tex = glBinding.getCameraImage(view.camera);
+        if (!tex) return;
 
-        const cameraWidth = view.camera.width;
-        const cameraHeight = view.camera.height;
-
-        if (cameraCanvas.width !== cameraWidth || cameraCanvas.height !== cameraHeight) {
-          cameraCanvas.width = cameraWidth;
-          cameraCanvas.height = cameraHeight;
-        }
-
-        const tPreStart = performance.now();
+        processingLock.busy = true;
+        const w = view.camera.width;
+        const h = view.camera.height;
 
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cameraTexture, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-        const pixels = new Uint8Array(cameraWidth * cameraHeight * 4);
-        gl.readPixels(0, 0, cameraWidth, cameraHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const tPreStart = performance.now();
 
-        const imageData = new ImageData(new Uint8ClampedArray(pixels), cameraWidth, cameraHeight);
-        cameraCtx.putImageData(imageData, 0, 0);
+        const pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        resizeCtx.drawImage(cameraCanvas, 0, 0, 224, 224);
+        createImageBitmap(imageData).then(bitmap => {
+          tempCtx.clearRect(0, 0, 224, 224);
+          tempCtx.drawImage(bitmap, 0, 0, 224, 224);
 
-        processingLock.busy = true;
+          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const tPreEnd = performance.now();
 
-        const input = tf.tidy(() => {
-          const image = tf.browser.fromPixels(resizeCanvas);
-          return image.toFloat().div(255).expandDims();
-        });
+          const prediction = model.predict(input).squeeze();
 
-        const tPreEnd = performance.now();
+          prediction.data().then(() => {
+            const tPredictEnd = performance.now();
+            tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+              const tPostEnd = performance.now();
+              maskCanvas.width = window.innerWidth;
+              maskCanvas.height = window.innerHeight;
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-        const prediction = model.predict(input).squeeze();
+              tf.dispose([input, prediction]);
+              processingLock.busy = false;
 
-        prediction.data().then(() => {
-          const tPredictEnd = performance.now();
+              const now = performance.now();
+              const frameTime = now - lastFrameTime;
+              lastFrameTime = now;
+              fpsHistory.push(1000 / frameTime);
+              if (fpsHistory.length > 30) fpsHistory.shift();
+              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-          tf.browser.toPixels(tf.sub(1, prediction), maskTempCanvas).then(() => {
-            const tPostEnd = performance.now();
-
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx.drawImage(maskTempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-
-            tf.dispose([input, prediction]);
-            processingLock.busy = false;
-
-            const now = performance.now();
-            const frameTime = now - lastFrameTime;
-            lastFrameTime = now;
-            fpsHistory.push(1000 / frameTime);
-            if (fpsHistory.length > 30) fpsHistory.shift();
-            const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-            log(`Preprocess: ${(tPreEnd - tPreStart).toFixed(1)} ms\nPredict: ${(tPredictEnd - tPreEnd).toFixed(1)} ms\nPostprocess: ${(tPostEnd - tPredictEnd).toFixed(1)} ms\nFPS: ${avgFps.toFixed(1)}`);
+              log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+            });
           });
         });
       });
