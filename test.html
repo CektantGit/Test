@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (WebGPU Optimized)</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AR Segmentation with Timing</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     #maskCanvas {
@@ -59,22 +59,10 @@
     let fpsHistory = [];
 
     async function loadModel() {
-      try {
-        await tf.setBackend('webgpu');
-        await tf.ready();
-        log('Using WebGPU backend\n');
-      } catch (e) {
-        log('WebGPU init failed, falling back to WebGL...');
-        await tf.setBackend('webgl');
-        await tf.ready();
-        log('Using WebGL backend\n');
-      }
-      try {
-        model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded\n");
-      } catch (e) {
-        log('Model load failed: ' + e.message);
-      }
+      await tf.setBackend('webgl');
+      await tf.ready();
+      model = await tf.loadLayersModel('jsModel/model.json');
+      log("Model loaded\n");
     }
 
     function log(msg) {
@@ -82,7 +70,6 @@
     }
 
     async function startAR() {
-      log("Starting AR...");
       await loadModel();
 
       const canvas = document.createElement('canvas');
@@ -95,7 +82,7 @@
           domOverlay: { root: document.body }
         });
       } catch (e) {
-        log('Failed to start AR session: ' + e.message);
+        log('AR session failed: ' + e.message);
         return;
       }
 
@@ -117,6 +104,7 @@
         if (!tex) return;
 
         processingLock.busy = true;
+
         const w = view.camera.width;
         const h = view.camera.height;
 
@@ -130,49 +118,56 @@
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
         const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        createImageBitmap(imageData).then(bitmap => {
+        createImageBitmap(imageData).then(async bitmap => {
           tempCtx.drawImage(bitmap, 0, 0, 224, 224);
 
-          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const input = tf.browser.fromPixels(tempCanvas)
+                                  .resizeBilinear([224, 224])
+                                  .div(255.0)
+                                  .expandDims();
+
           const tPreEnd = performance.now();
 
-          const prediction = model.predict(input).squeeze();
+          await tf.nextFrame(); // важно для избежания pipeline lock
 
-          prediction.data().then(() => {
-            const tPredictEnd = performance.now();
-            tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-              const tPostEnd = performance.now();
-              maskCanvas.width = window.innerWidth;
-              maskCanvas.height = window.innerHeight;
-              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+          const tInferStart = performance.now();
+          const prediction = await model.predict(input); // без .data()
+          await tf.nextFrame();
+          const tInferEnd = performance.now();
 
-              tf.dispose([input, prediction]);
-              processingLock.busy = false;
+          const tPostStart = performance.now();
 
-              const now = performance.now();
-              const frameTime = now - lastFrameTime;
-              lastFrameTime = now;
-              fpsHistory.push(1000 / frameTime);
-              if (fpsHistory.length > 30) fpsHistory.shift();
-              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+          await tf.browser.toPixels(tf.sub(1, prediction.squeeze()), tempCanvas);
+          const tPostEnd = performance.now();
 
-              log(Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)});
-            });
-          });
+          maskCanvas.width = window.innerWidth;
+          maskCanvas.height = window.innerHeight;
+          maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+          maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+
+          tf.dispose([input, prediction]);
+          processingLock.busy = false;
+
+          const now = performance.now();
+          const frameTime = now - lastFrameTime;
+          lastFrameTime = now;
+          fpsHistory.push(1000 / frameTime);
+          if (fpsHistory.length > 30) fpsHistory.shift();
+          const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+          log(
+            `Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\n` +
+            `Infer: ${(tInferEnd - tInferStart).toFixed(1)}ms\n` +
+            `Post: ${(tPostEnd - tPostStart).toFixed(1)}ms\n` +
+            `FPS: ${avgFps.toFixed(1)}`
+          );
         });
       });
 
       document.getElementById('startBtn').style.display = 'none';
     }
 
-    document.getElementById('startBtn').addEventListener('click', () => {
-      try {
-        startAR();
-      } catch (e) {
-        log('Unexpected error: ' + e.message);
-      }
-    });
+    document.getElementById('startBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
