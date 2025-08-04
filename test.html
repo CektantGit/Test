@@ -224,18 +224,35 @@
         pass.setBindGroup(0, bind);
         pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
         pass.end();
+        // Bytes per row in GPUBuffer copies must be a multiple of 256.
+        // The 224 * 4 bytes produced per row (RGBA) need to be padded to meet
+        // this requirement, otherwise WebGPU throws "offset is out of bounds".
+        const bytesPerPixel = 4;
+        const alignedBytesPerRow = Math.ceil((224 * bytesPerPixel) / 256) * 256;
+
         const readback = device.createBuffer({
-          size: 224 * 224 * 4,
+          size: alignedBytesPerRow * 224,
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         });
         encoder.copyTextureToBuffer(
           { texture: postprocessTexture },
-          { buffer: readback, bytesPerRow: 224 * 4 },
+          { buffer: readback, bytesPerRow: alignedBytesPerRow },
           { width: 224, height: 224, depthOrArrayLayers: 1 }
         );
         queue.submit([encoder.finish()]);
         await readback.mapAsync(GPUMapMode.READ);
-        const array = new Uint8ClampedArray(readback.getMappedRange().slice(0));
+        const mapped = new Uint8Array(readback.getMappedRange());
+
+        // Remove row padding before creating ImageData
+        const array = new Uint8ClampedArray(224 * 224 * bytesPerPixel);
+        for (let y = 0; y < 224; y++) {
+          const srcOffset = y * alignedBytesPerRow;
+          const dstOffset = y * 224 * bytesPerPixel;
+          array.set(
+            mapped.subarray(srcOffset, srcOffset + 224 * bytesPerPixel),
+            dstOffset
+          );
+        }
         readback.unmap();
         const imageData = new ImageData(array, 224, 224);
         const off = document.createElement('canvas');
