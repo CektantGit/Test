@@ -223,7 +223,14 @@
               const postStart = performance.now();
 
               const texData = tf.backend().texData.get(prediction.dataId);
-              drawMaskFromGLTexture(texData.texture);
+              const maskTex = Array.isArray(texData?.texture)
+                ? texData.texture[0]
+                : texData?.texture;
+              if (maskTex instanceof WebGLTexture) {
+                drawMaskFromGLTexture(maskTex);
+              } else {
+                logGLInfo('Prediction texture missing or invalid');
+              }
               const postTime = performance.now() - postStart;
 
             tf.dispose([inputTensor, prediction]);
