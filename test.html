@@ -30,6 +30,20 @@
       white-space: pre-wrap;
       max-width: 90vw;
     }
+    #glInfo {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      color: lime;
+      background: rgba(0,0,0,0.6);
+      padding: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 21;
+      white-space: pre-wrap;
+      max-width: 90vw;
+      text-align: right;
+    }
     #startBtn {
       position: absolute;
       top: 10px;
@@ -48,6 +62,7 @@
   <button id="startBtn">Start AR Segmentation</button>
   <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
+  <div id="glInfo"></div>
 
   <script>
     let model;
@@ -64,6 +79,10 @@
     function log(msg) {
       console.error(msg);
       document.getElementById('info').textContent = "Status:\n" + msg;
+    }
+
+    function logGLInfo(msg) {
+      document.getElementById('glInfo').textContent = msg;
     }
 
     async function loadModel() {
@@ -133,10 +152,10 @@
               const internalFormat = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_INTERNAL_FORMAT);
               const type = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_TYPE);
               const format = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_FORMAT);
-              log("AR Texture Info:\n" +
-                  "InternalFormat: " + internalFormat + "\n" +
-                  "Type: " + type + "\n" +
-                  "Format: " + format);
+              logGLInfo("AR Texture Info:\n" +
+                         "InternalFormat: " + internalFormat + "\n" +
+                         "Type: " + type + "\n" +
+                         "Format: " + format);
             } catch (err) {
               log("Texture format read error: " + err.message);
             }
