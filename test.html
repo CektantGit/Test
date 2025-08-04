@@ -8,15 +8,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
     body { margin: 0; overflow: hidden; }
-    #maskCanvas {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 10;
-      pointer-events: none;
-      transform: rotate(180deg) scaleX(-1);
-    }
     #info, #glInfo {
       position: absolute;
       font-family: monospace;
@@ -45,17 +36,16 @@
   </style>
 </head>
 <body>
-  <button id="startBtn">Start AR Segmentation</button>
-  <canvas id="maskCanvas"></canvas>
-  <div id="info">Status: idle</div>
-  <div id="glInfo"></div>
+    <button id="startBtn">Start AR Segmentation</button>
+    <div id="info">Status: idle</div>
+    <div id="glInfo"></div>
 
   <script>
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
       let model, gl, session, glBinding;
-      let maskCanvas, maskCtx;
     let processingLock, fpsHistory;
+    let shaderProgram, quadVBO, maskTexLoc, posLoc;
 
     function log(msg) {
       console.error(msg);
@@ -64,6 +54,54 @@
 
     function logGLInfo(msg) {
       document.getElementById('glInfo').textContent = msg;
+    }
+
+    function initMaskPipeline(gl) {
+      const vertSrc = `
+        attribute vec2 pos;
+        varying vec2 v_uv;
+        void main() {
+          v_uv = pos * 0.5 + 0.5;
+          gl_Position = vec4(pos, 0.0, 1.0);
+        }
+      `;
+      const fragSrc = `
+        precision mediump float;
+        uniform sampler2D u_mask;
+        varying vec2 v_uv;
+        void main() {
+          float m = texture2D(u_mask, v_uv).r;
+          gl_FragColor = vec4(vec3(1.0 - m), 1.0);
+        }
+      `;
+      const vs = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs, vertSrc);
+      gl.compileShader(vs);
+      const fs = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs, fragSrc);
+      gl.compileShader(fs);
+      shaderProgram = gl.createProgram();
+      gl.attachShader(shaderProgram, vs);
+      gl.attachShader(shaderProgram, fs);
+      gl.linkProgram(shaderProgram);
+      posLoc = gl.getAttribLocation(shaderProgram, 'pos');
+      maskTexLoc = gl.getUniformLocation(shaderProgram, 'u_mask');
+      quadVBO = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    }
+
+    function drawMaskFromGLTexture(texture) {
+      if (!shaderProgram) return;
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.useProgram(shaderProgram);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(maskTexLoc, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
     // Convert the AR camera WebGL texture directly into a 224x224 tensor
@@ -117,15 +155,23 @@
 
         await loadModel();
 
-        // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
-        // OffscreenCanvas is not a DOM node and cannot be appended to the document,
-        // so only append when the canvas is an HTMLCanvasElement.
+        // Use the backend canvas as the mask overlay.
         const renderCanvas = gl.canvas;
         if (renderCanvas instanceof HTMLCanvasElement) {
           renderCanvas.width = window.innerWidth;
           renderCanvas.height = window.innerHeight;
+          renderCanvas.style.position = 'fixed';
+          renderCanvas.style.top = '0';
+          renderCanvas.style.left = '0';
+          renderCanvas.style.width = '100vw';
+          renderCanvas.style.height = '100vh';
+          renderCanvas.style.zIndex = '10';
+          renderCanvas.style.pointerEvents = 'none';
+          renderCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
+          renderCanvas.id = 'maskCanvas';
           document.body.appendChild(renderCanvas);
         }
+        initMaskPipeline(gl);
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -175,24 +221,9 @@
               await tf.nextFrame();
               const inferenceTime = performance.now() - inferenceStart;
               const postStart = performance.now();
-              const unetMaskArray = prediction.dataSync();
 
-              
-              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              const maskImageData = maskCtx.createImageData(224, 224);
-
-              for (let y = 0; y < 224; y++) {
-                for (let x = 0; x < 224; x++) {
-                  const value = unetMaskArray[y * 224 + x] * 255;
-                  const idx = (y * 224 + x) * 4;
-                  maskImageData.data[idx + 0] = 255 - value;
-                  maskImageData.data[idx + 1] = 255 - value;
-                  maskImageData.data[idx + 2] = 255 - value;
-                  maskImageData.data[idx + 3] = 255 - value;
-                }
-              }
-
-              maskCtx.putImageData(maskImageData, 0, 0);
+              const texData = tf.backend().texData.get(prediction.dataId);
+              drawMaskFromGLTexture(texData.texture);
               const postTime = performance.now() - postStart;
 
             tf.dispose([inputTensor, prediction]);
@@ -226,15 +257,6 @@
     // once the document is ready. This ensures nothing runs before the user
     // explicitly clicks the button.
     function init() {
-      maskCanvas = document.getElementById('maskCanvas');
-      if (!maskCanvas) {
-        log('maskCanvas is invalid or not found');
-        return;
-      }
-      maskCtx = maskCanvas.getContext('2d');
-      maskCanvas.width = 224;
-      maskCanvas.height = 224;
-
       processingLock = { busy: false };
       fpsHistory = [];
 
