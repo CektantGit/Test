@@ -50,13 +50,14 @@
 
   <script>
     let model;
-    let gl, session, glBinding;
+    let gl, session;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     let fpsHistory = [];
 
     const logElem = document.getElementById('info');
     const logLines = [];
+
     function log(msg) {
       logLines.push(msg);
       logElem.textContent = logLines.join('\n');
@@ -73,7 +74,7 @@
 
     // WebGPU resources for fully GPU-based pre/post processing
     const PREPROCESS_WGSL = `
-      @group(0) @binding(0) var cameraTex : texture_external;
+      @group(0) @binding(0) var cameraTex : texture_2d<f32>;
       @group(0) @binding(1) var<storage, read_write> outBuf : array<f32>;
       @group(0) @binding(2) var samp : sampler;
 
@@ -103,7 +104,7 @@
     `;
 
     let device, queue, preprocessPipeline, postprocessPipeline;
-    let preprocessBuffer, postprocessTexture, sampler;
+    let preprocessBuffer, postprocessTexture, sampler, cameraTexture;
 
     async function initGPU() {
       try {
@@ -139,19 +140,29 @@
         });
 
         sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+        cameraTexture = device.createTexture({
+          size: [224, 224],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+        });
       } catch (e) {
         log('initGPU failed: ' + e.message);
         throw e;
       }
     }
 
-    async function preprocess(cameraTex) {
+    async function preprocess(cameraBitmap) {
       try {
-        const external = device.importExternalTexture({ source: cameraTex });
+        queue.copyExternalImageToTexture(
+          { source: cameraBitmap },
+          { texture: cameraTexture },
+          [224, 224]
+        );
         const bind = device.createBindGroup({
           layout: preprocessPipeline.getBindGroupLayout(0),
           entries: [
-            { binding: 0, resource: external },
+            { binding: 0, resource: cameraTexture.createView() },
             { binding: 1, resource: { buffer: preprocessBuffer } },
             { binding: 2, resource: sampler }
           ]
@@ -273,7 +284,6 @@
 
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       const referenceSpace = await session.requestReferenceSpace('local');
-      glBinding = new XRWebGLBinding(session, gl);
 
       let lastFrameTime = performance.now();
 
@@ -284,15 +294,17 @@
           return;
         }
 
-        const view = pose.views[0];
-        const tex = glBinding.getCameraImage(view.camera);
-        if (!tex) {
+        let tex;
+        try {
+          tex = await createImageBitmap(gl.canvas);
+        } catch (_) {
           session.requestAnimationFrame(onFrame);
           return;
         }
 
         const tPreStart = performance.now();
         const input = await preprocess(tex);
+        tex.close();
         const tPreEnd = performance.now();
 
         const tPredictStart = performance.now();
