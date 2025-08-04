@@ -153,8 +153,10 @@
 
     async function postprocess(maskTensor) {
       try {
+        // toPixels expects int32 [0-255] values or float32 [0-1].
+        // maskTensor is float32 0/1, so multiply and cast to int
         await tf.browser.toPixels(
-          tf.tidy(() => maskTensor.mul(255)),
+          tf.tidy(() => maskTensor.mul(255).toInt()),
           tempCanvas
         );
         maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
