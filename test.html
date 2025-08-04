@@ -260,7 +260,32 @@
         await preprocessReadback.mapAsync(GPUMapMode.READ);
         const mapped = preprocessReadback.getMappedRange().slice(0);
         preprocessReadback.unmap();
-        const floatData = new Float32Array(mapped);
+        let floatData = new Float32Array(mapped);
+
+        // Some browsers may still return an empty (black) frame. Detect this and
+        // fall back to a CPU-based readPixels path so that a valid image is
+        // always produced for preprocessing.
+        let allZero = true;
+        for (let i = 0; i < floatData.length; ++i) {
+          if (floatData[i] !== 0) { allZero = false; break; }
+        }
+        if (allZero) {
+          const pixels = new Uint8Array(224 * 224 * 4);
+          gl.readPixels(0, 0, 224, 224, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          floatData = new Float32Array(224 * 224 * 3);
+          for (let i = 0, j = 0; i < pixels.length; i += 4, j += 3) {
+            floatData[j] = pixels[i] / 255;
+            floatData[j + 1] = pixels[i + 1] / 255;
+            floatData[j + 2] = pixels[i + 2] / 255;
+          }
+          if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
+            inputCanvas.width = 224;
+            inputCanvas.height = 224;
+          }
+          const imgData = new ImageData(new Uint8ClampedArray(pixels.buffer), 224, 224);
+          inputCtx.putImageData(imgData, 0, 0);
+          return tf.tensor(floatData, [1, 224, 224, 3]);
+        }
 
         if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
           inputCanvas.width = 224;
