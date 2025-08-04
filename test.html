@@ -69,8 +69,6 @@
     const maskCtx = maskCanvas.getContext('2d');
     const inputCanvas = document.getElementById('inputPreview');
     const inputCtx = inputCanvas.getContext('2d');
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = tempCanvas.height = 224;
     let fpsHistory = [];
 
     const logElem = document.getElementById('info');
@@ -138,12 +136,16 @@
     async function preprocess(source) {
       try {
         if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
-          inputCanvas.width = 224;
-          inputCanvas.height = 224;
+          inputCanvas.width = inputCanvas.height = 224;
         }
         inputCtx.drawImage(source, 0, 0, 224, 224);
         return tf.tidy(() =>
-          tf.browser.fromPixels(inputCanvas).toFloat().div(255).expandDims(0)
+          tf.browser
+            .fromPixels(source, 3)
+            .resizeBilinear([224, 224])
+            .toFloat()
+            .div(255)
+            .expandDims(0)
         );
       } catch (e) {
         log('preprocess failed: ' + e.message);
@@ -153,19 +155,14 @@
 
     async function postprocess(maskTensor) {
       try {
-        // toPixels expects int32 [0-255] values or float32 [0-1].
-        // maskTensor is float32 0/1, so multiply and cast to int
         await tf.browser.toPixels(
-          tf.tidy(() => maskTensor.mul(255).toInt()),
-          tempCanvas
-        );
-        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        maskCtx.drawImage(
-          tempCanvas,
-          0,
-          0,
-          maskCanvas.width,
-          maskCanvas.height
+          tf.tidy(() =>
+            maskTensor
+              .resizeBilinear([maskCanvas.height, maskCanvas.width])
+              .mul(255)
+              .toInt()
+          ),
+          maskCanvas
         );
       } catch (e) {
         log('postprocess failed: ' + e.message);
