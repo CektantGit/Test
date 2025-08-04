@@ -133,16 +133,15 @@
       return true;
     }
 
-    async function preprocess(source) {
+    async function preprocess() {
       try {
         if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
           inputCanvas.width = inputCanvas.height = 224;
         }
-        inputCtx.drawImage(source, 0, 0, 224, 224);
+        inputCtx.drawImage(gl.canvas, 0, 0, 224, 224);
         return tf.tidy(() =>
           tf.browser
-            .fromPixels(inputCanvas, 3)
-            .resizeBilinear([224, 224])
+            .fromPixels(gl.canvas, 3)
             .div(255)
             .expandDims()
         );
@@ -154,25 +153,22 @@
 
     async function postprocess(maskTensor) {
       try {
-        const maskData = maskTensor.dataSync();
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = 224;
-        offCanvas.height = 224;
-        const offCtx = offCanvas.getContext('2d');
-        const imgData = offCtx.createImageData(224, 224);
-        for (let y = 0; y < 224; y++) {
-          for (let x = 0; x < 224; x++) {
-            const value = maskData[y * 224 + x] * 255;
-            const idx = (y * 224 + x) * 4;
-            imgData.data[idx] = 255 - value;
-            imgData.data[idx + 1] = 255 - value;
-            imgData.data[idx + 2] = 255 - value;
-            imgData.data[idx + 3] = 255;
-          }
-        }
-        offCtx.putImageData(imgData, 0, 0);
-        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        maskCtx.drawImage(offCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+        await tf.browser.toPixels(
+          tf.tidy(() =>
+            tf.mul(
+              tf.sub(
+                1,
+                tf.image.resizeBilinear(
+                  maskTensor.expandDims(-1),
+                  [maskCanvas.height, maskCanvas.width],
+                  true
+                )
+              ),
+              255
+            ).toInt()
+          ),
+          maskCanvas
+        );
       } catch (e) {
         log('postprocess failed: ' + e.message);
         throw e;
@@ -251,7 +247,7 @@
         }
 
         const tPreStart = performance.now();
-        const input = await preprocess(gl.canvas);
+        const input = await preprocess();
         const meanVal = (await input.mean().data())[0];
         log('input mean ' + meanVal.toFixed(3));
         const tPreEnd = performance.now();
