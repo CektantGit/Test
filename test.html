@@ -269,6 +269,8 @@
       }
 
       const canvas = document.createElement('canvas');
+      canvas.width = 224;
+      canvas.height = 224;
       document.body.appendChild(canvas);
       gl = canvas.getContext('webgl', { xrCompatible: true });
 
