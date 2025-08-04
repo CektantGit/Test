@@ -104,7 +104,7 @@
     `;
 
     let device, queue, preprocessPipeline, postprocessPipeline;
-    let preprocessBuffer, postprocessTexture, sampler, cameraTexture;
+    let preprocessBuffer, preprocessReadback, postprocessTexture, sampler, cameraTexture;
 
     async function initGPU() {
       try {
@@ -130,7 +130,12 @@
 
         preprocessBuffer = device.createBuffer({
           size: 224 * 224 * 3 * 4,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_READ
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        });
+
+        preprocessReadback = device.createBuffer({
+          size: 224 * 224 * 3 * 4,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         });
 
         postprocessTexture = device.createTexture({
@@ -173,10 +178,17 @@
         pass.setBindGroup(0, bind);
         pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
         pass.end();
+        encoder.copyBufferToBuffer(
+          preprocessBuffer,
+          0,
+          preprocessReadback,
+          0,
+          224 * 224 * 3 * 4
+        );
         queue.submit([encoder.finish()]);
-        await preprocessBuffer.mapAsync(GPUMapMode.READ);
-        const mapped = preprocessBuffer.getMappedRange().slice(0);
-        preprocessBuffer.unmap();
+        await preprocessReadback.mapAsync(GPUMapMode.READ);
+        const mapped = preprocessReadback.getMappedRange().slice(0);
+        preprocessReadback.unmap();
         return tf.tensor(new Float32Array(mapped), [1, 224, 224, 3]);
       } catch (e) {
         log('preprocess failed: ' + e.message);
