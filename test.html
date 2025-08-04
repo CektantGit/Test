@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AR Real-time Segmentation (Final Optimized)</title>
+  <title>AR Segmentation - Preprocess & Inference Optimized</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
@@ -53,8 +53,8 @@
     let gl, session, glBinding, referenceSpace;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = new OffscreenCanvas(224, 224);
-    const tempCtx = tempCanvas.getContext('2d');
+    const cameraCanvas = new OffscreenCanvas(224, 224);
+    const cameraCtx = cameraCanvas.getContext('2d');
     const processingLock = { busy: false };
     let fpsHistory = [];
     let lastFrameTime = performance.now();
@@ -113,7 +113,7 @@
     }
 
     function onFrame(time, frame) {
-      if (processingLock.busy) return; // 💥 сразу выходим если занято
+      if (processingLock.busy) return;
 
       const pose = frame.getViewerPose(referenceSpace);
       if (!pose) return requestNextFrame();
@@ -139,36 +139,46 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-      const tPreStart = performance.now();
-
       const pixels = new Uint8Array(w * h * 4);
       gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
       const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
       const bitmap = await createImageBitmap(imageData);
 
-      tempCtx.drawImage(bitmap, 0, 0, 224, 224);
-
-      const input = tf.tidy(() =>
-        tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims()
-      );
+      // === Preprocess ===
+      const tPreStart = performance.now();
+      cameraCtx.drawImage(bitmap, 0, 0, 224, 224);
+      const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
+                                   .resizeBilinear([224, 224])
+                                   .div(255.0)
+                                   .expandDims();
       const tPreEnd = performance.now();
 
-      const prediction = model.predict(input).squeeze();
-      await prediction.data(); // заставляем рассчитать
+      // === Inference ===
+      const tInferStart = performance.now();
+      const predictions = await model.predict(imageTensor);
+      const unetMaskArray = predictions.dataSync();
+      const tInferEnd = performance.now();
 
-      const tPredictEnd = performance.now();
+      tf.dispose([imageTensor, predictions]);
 
-      await tf.browser.toPixels(tf.sub(1, prediction), tempCanvas);
+      // === Postprocess (draw directly from array) ===
+      const imageDataMask = new ImageData(224, 224);
+      for (let i = 0; i < 224 * 224; i++) {
+        const v = 255 - (unetMaskArray[i] * 255) | 0;
+        const j = i * 4;
+        imageDataMask.data[j + 0] = v;
+        imageDataMask.data[j + 1] = v;
+        imageDataMask.data[j + 2] = v;
+        imageDataMask.data[j + 3] = 255;
+      }
 
-      const tPostEnd = performance.now();
-
+      const bitmapMask = await createImageBitmap(imageDataMask);
       maskCanvas.width = window.innerWidth;
       maskCanvas.height = window.innerHeight;
       maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-      maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+      maskCtx.drawImage(bitmapMask, 0, 0, maskCanvas.width, maskCanvas.height);
 
-      tf.dispose([input, prediction]);
-
+      // === FPS info ===
       const now = performance.now();
       const frameTime = now - lastFrameTime;
       lastFrameTime = now;
@@ -176,7 +186,7 @@
       if (fpsHistory.length > 30) fpsHistory.shift();
       const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-      log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+      log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tInferEnd - tInferStart).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
     }
 
     document.getElementById('startBtn').addEventListener('click', () => {
