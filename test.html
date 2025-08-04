@@ -6,6 +6,14 @@
   <title>AR Real-time Segmentation (WebGLTexture Direct Input)</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
   <style>
     body { margin: 0; overflow: hidden; }
     #info, #glInfo {
@@ -40,9 +48,9 @@
   <div id="info">Status: idle</div>
   <div id="glInfo"></div>
   <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-    import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js';
-    import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/RenderPass.js';
+    import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
       let model, gl, session, glBinding;
