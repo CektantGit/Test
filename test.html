@@ -69,6 +69,8 @@
     const maskCtx = maskCanvas.getContext('2d');
     const inputCanvas = document.getElementById('inputPreview');
     const inputCtx = inputCanvas.getContext('2d');
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = tempCanvas.height = 224;
     let fpsHistory = [];
 
     const logElem = document.getElementById('info');
@@ -133,175 +135,16 @@
       return true;
     }
 
-    // WebGPU resources for fully GPU-based pre/post processing
-    const PREPROCESS_WGSL = `
-      @group(0) @binding(0) var cameraTex : texture_2d<f32>;
-      @group(0) @binding(1) var<storage, read_write> outBuf : array<f32>;
-      @group(0) @binding(2) var samp : sampler;
-
-      // Camera RGB values are already in the [0,1] range expected by the
-      // segmentation network, so we simply pass them through. Performing this
-      // copy in the compute shader keeps all preprocessing on the GPU.
-      @compute @workgroup_size(8,8)
-      fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-        if (gid.x >= 224u || gid.y >= 224u) { return; }
-        let uv = (vec2<f32>(gid.xy) + vec2<f32>(0.5)) / vec2<f32>(224.0, 224.0);
-        let rgb = textureSampleLevel(cameraTex, samp, uv, 0.0).rgb;
-        let idx = (gid.y * 224u + gid.x) * 3u;
-        outBuf[idx+0u] = rgb.r;
-        outBuf[idx+1u] = rgb.g;
-        outBuf[idx+2u] = rgb.b;
-      }
-    `;
-
-    const POSTPROCESS_WGSL = `
-      @group(0) @binding(0) var<storage, read> mask : array<f32>;
-      @group(0) @binding(1) var outTex : texture_storage_2d<rgba8unorm, write>;
-
-      @compute @workgroup_size(8,8)
-      fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-        if (gid.x >= 224u || gid.y >= 224u) { return; }
-        let m = mask[gid.y * 224u + gid.x];
-        let color = vec4<f32>(1.0, 0.0, 0.0, m);
-        textureStore(outTex, vec2<i32>(gid.xy), color);
-      }
-    `;
-
-    let device, queue, preprocessPipeline, postprocessPipeline;
-    let preprocessBuffer, preprocessReadback, postprocessTexture, sampler, cameraTexture;
-
-    async function initGPU() {
-      try {
-        const adapter = await navigator.gpu.requestAdapter();
-        device = await adapter.requestDevice();
-        queue = device.queue;
-
-        preprocessPipeline = device.createComputePipeline({
-          layout: 'auto',
-          compute: {
-            module: device.createShaderModule({ code: PREPROCESS_WGSL }),
-            entryPoint: 'main'
-          }
-        });
-
-        postprocessPipeline = device.createComputePipeline({
-          layout: 'auto',
-          compute: {
-            module: device.createShaderModule({ code: POSTPROCESS_WGSL }),
-            entryPoint: 'main'
-          }
-        });
-
-        preprocessBuffer = device.createBuffer({
-          size: 224 * 224 * 3 * 4,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-        });
-
-        preprocessReadback = device.createBuffer({
-          size: 224 * 224 * 3 * 4,
-          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-        });
-
-        postprocessTexture = device.createTexture({
-          size: [224, 224],
-          format: 'rgba8unorm',
-          usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
-        });
-
-        sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-
-        cameraTexture = device.createTexture({
-          size: [224, 224],
-          format: 'rgba8unorm',
-          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-        });
-      } catch (e) {
-        log('initGPU failed: ' + e.message);
-        throw e;
-      }
-    }
-
     async function preprocess(source) {
       try {
-        // createImageBitmap ensures the WebGL canvas is fully resolved before
-        // copying it into a WebGPU texture. Without this step the texture copy
-        // may read back an empty (black) frame on some browsers.
-        const bitmap = await createImageBitmap(source);
-        queue.copyExternalImageToTexture(
-          { source: bitmap, flipY: true },
-          { texture: cameraTexture },
-          [224, 224]
-        );
-        // We no longer need the bitmap after it has been copied to the GPU.
-        bitmap.close();
-        await queue.onSubmittedWorkDone();
-        const bind = device.createBindGroup({
-          layout: preprocessPipeline.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: cameraTexture.createView() },
-            { binding: 1, resource: { buffer: preprocessBuffer } },
-            { binding: 2, resource: sampler }
-          ]
-        });
-        const encoder = device.createCommandEncoder();
-        const pass = encoder.beginComputePass();
-        pass.setPipeline(preprocessPipeline);
-        pass.setBindGroup(0, bind);
-        pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
-        pass.end();
-        encoder.copyBufferToBuffer(
-          preprocessBuffer,
-          0,
-          preprocessReadback,
-          0,
-          224 * 224 * 3 * 4
-        );
-        queue.submit([encoder.finish()]);
-        await preprocessReadback.mapAsync(GPUMapMode.READ);
-        const mapped = preprocessReadback.getMappedRange().slice(0);
-        preprocessReadback.unmap();
-        let floatData = new Float32Array(mapped);
-
-        // Some browsers may still return an empty (black) frame. Detect this and
-        // fall back to a CPU-based readPixels path so that a valid image is
-        // always produced for preprocessing.
-        let allZero = true;
-        for (let i = 0; i < floatData.length; ++i) {
-          if (floatData[i] !== 0) { allZero = false; break; }
-        }
-        if (allZero) {
-          const pixels = new Uint8Array(224 * 224 * 4);
-          gl.readPixels(0, 0, 224, 224, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-          floatData = new Float32Array(224 * 224 * 3);
-          for (let i = 0, j = 0; i < pixels.length; i += 4, j += 3) {
-            floatData[j] = pixels[i] / 255;
-            floatData[j + 1] = pixels[i + 1] / 255;
-            floatData[j + 2] = pixels[i + 2] / 255;
-          }
-          if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
-            inputCanvas.width = 224;
-            inputCanvas.height = 224;
-          }
-          const imgData = new ImageData(new Uint8ClampedArray(pixels.buffer), 224, 224);
-          inputCtx.putImageData(imgData, 0, 0);
-          return tf.tensor(floatData, [1, 224, 224, 3]);
-        }
-
         if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
           inputCanvas.width = 224;
           inputCanvas.height = 224;
         }
-        const clamped = new Uint8ClampedArray(224 * 224 * 4);
-        for (let i = 0, j = 0; i < floatData.length; i += 3, j += 4) {
-          clamped[j] = floatData[i] * 255;
-          clamped[j + 1] = floatData[i + 1] * 255;
-          clamped[j + 2] = floatData[i + 2] * 255;
-          clamped[j + 3] = 255;
-        }
-        const imgData = new ImageData(clamped, 224, 224);
-        inputCtx.putImageData(imgData, 0, 0);
-
-        return tf.tensor(floatData, [1, 224, 224, 3]);
+        inputCtx.drawImage(source, 0, 0, 224, 224);
+        return tf.tidy(() =>
+          tf.browser.fromPixels(inputCanvas).toFloat().div(255).expandDims(0)
+        );
       } catch (e) {
         log('preprocess failed: ' + e.message);
         throw e;
@@ -310,80 +153,18 @@
 
     async function postprocess(maskTensor) {
       try {
-        let tensor = maskTensor;
-        if (maskTensor.dtype !== 'float32') {
-          tensor = maskTensor.toFloat();
-        }
-        const raw = await tensor.data();
-        const data = raw instanceof Float32Array ? raw : new Float32Array(raw);
-        if (tensor !== maskTensor) tensor.dispose();
-        const upload = device.createBuffer({
-          size: data.byteLength,
-          usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE,
-          mappedAtCreation: true
-        });
-        new Float32Array(upload.getMappedRange()).set(data);
-        upload.unmap();
-        const maskBuf = device.createBuffer({
-          size: data.byteLength,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-        });
-        const encoder = device.createCommandEncoder();
-        encoder.copyBufferToBuffer(upload, 0, maskBuf, 0, data.byteLength);
-        const bind = device.createBindGroup({
-          layout: postprocessPipeline.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: { buffer: maskBuf } },
-            { binding: 1, resource: postprocessTexture.createView() }
-          ]
-        });
-        const pass = encoder.beginComputePass();
-        pass.setPipeline(postprocessPipeline);
-        pass.setBindGroup(0, bind);
-        pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
-        pass.end();
-        // Bytes per row in GPUBuffer copies must be a multiple of 256.
-        // The 224 * 4 bytes produced per row (RGBA) need to be padded to meet
-        // this requirement, otherwise WebGPU throws "offset is out of bounds".
-        const bytesPerPixel = 4;
-        const alignedBytesPerRow = Math.ceil((224 * bytesPerPixel) / 256) * 256;
-        const rowsPerImage = 224;
-
-        const readback = device.createBuffer({
-          size: alignedBytesPerRow * rowsPerImage,
-          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-        });
-        encoder.copyTextureToBuffer(
-          { texture: postprocessTexture },
-          {
-            buffer: readback,
-            bytesPerRow: alignedBytesPerRow,
-            rowsPerImage,
-          },
-          { width: 224, height: 224, depthOrArrayLayers: 1 }
+        await tf.browser.toPixels(
+          tf.tidy(() => maskTensor.mul(255)),
+          tempCanvas
         );
-        queue.submit([encoder.finish()]);
-        await readback.mapAsync(GPUMapMode.READ);
-        const mapped = new Uint8Array(readback.getMappedRange());
-
-        // Remove row padding before creating ImageData
-        const array = new Uint8ClampedArray(224 * 224 * bytesPerPixel);
-        for (let y = 0; y < 224; y++) {
-          const srcOffset = y * alignedBytesPerRow;
-          const dstOffset = y * 224 * bytesPerPixel;
-          array.set(
-            mapped.subarray(srcOffset, srcOffset + 224 * bytesPerPixel),
-            dstOffset
-          );
-        }
-        readback.unmap();
-        const imageData = new ImageData(array, 224, 224);
-        const off = document.createElement('canvas');
-        off.width = 224;
-        off.height = 224;
-        off.getContext('2d').putImageData(imageData, 0, 0);
         maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        maskCtx.drawImage(off, 0, 0, maskCanvas.width, maskCanvas.height);
+        maskCtx.drawImage(
+          tempCanvas,
+          0,
+          0,
+          maskCanvas.width,
+          maskCanvas.height
+        );
       } catch (e) {
         log('postprocess failed: ' + e.message);
         throw e;
@@ -414,7 +195,6 @@
       log('Starting AR...');
       try {
         await loadModel();
-        await initGPU();
       } catch (e) {
         log('Initialization error: ' + e.message);
         return;
