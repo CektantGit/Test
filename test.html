@@ -70,6 +70,24 @@
       document.getElementById('glInfo').textContent = msg;
     }
 
+    // Convert the AR camera WebGL texture directly into a normalized
+    // 224x224 tensor without syncing through the CPU. The AR camera uses an
+    // RGBA texture format (internal format 5090 in some browsers). We drop the
+    // alpha channel and scale pixel values to [0,1].
+    function preprocessTexture(tex, width, height) {
+      return tf.tidy(() => {
+        const webglData = { texture: tex, width, height, channels: 'RGBA' };
+        // Create a tensor backed by the same WebGL context.
+        const rgba = tf.tensor(webglData, [height, width, 4], 'float32');
+        // Remove alpha channel, resize to the model's expected input and
+        // normalize.
+        const rgb = tf.slice(rgba, [0, 0, 0], [-1, -1, 3]);
+        return tf.image.resizeBilinear(rgb, [224, 224])
+          .div(255)
+          .expandDims();
+      });
+    }
+
     async function loadModel(canvas) {
       try {
         gl = canvas.getContext('webgl', { xrCompatible: true });
@@ -128,34 +146,26 @@
 
             processingLock.busy = true;
 
-            const webglData = {
-              texture: tex,
-              width: texWidth,
-              height: texHeight,
-              channels: 'RGB'
-            };
-
-            let rawTensor;
+            let inputTensor;
             try {
-              rawTensor = tf.tensor(webglData, [texHeight, texWidth, 3], 'float32');
+              inputTensor = preprocessTexture(tex, texWidth, texHeight);
             } catch (err) {
               log("TF Error: " + err.message);
               processingLock.busy = false;
               return;
             }
 
-            const resized = tf.image.resizeBilinear(rawTensor, [224, 224])
-              .div(255).expandDims();
-            const prediction = model.predict(resized).squeeze();
+            const prediction = model.predict(inputTensor).squeeze();
 
             prediction.data().then(() => {
-              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+              const mask = tf.sub(1, prediction);
+              tf.browser.toPixels(mask, tempCanvas).then(() => {
                 maskCanvas.width = window.innerWidth;
                 maskCanvas.height = window.innerHeight;
                 maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
                 maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-                tf.dispose([rawTensor, resized, prediction]);
+                tf.dispose([inputTensor, prediction, mask]);
                 processingLock.busy = false;
 
                 const now = performance.now();
@@ -182,11 +192,15 @@
 
     window.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('startBtn');
-      if (btn && typeof btn.addEventListener === 'function') {
-        btn.addEventListener('click', startAR);
-      } else {
+      if (!btn) {
         log('startBtn is invalid or not found');
+        return;
       }
+
+      // Attach handler once the element is confirmed to exist. This avoids
+      // "a.addEventListener is not a function" errors when the element lookup
+      // returns something other than a DOM node.
+      btn.addEventListener('click', startAR);
     });
   </script>
 </body>
