@@ -143,14 +143,22 @@
 
             processingLock.busy = true;
 
+            const texWidth = view.camera.width;
+            const texHeight = view.camera.height;
+
             const inputTensor = tf.tensor({
               texture: tex,
-              width: 224,
-              height: 224,
-              channels: 'RGBA'
-            }, [224, 224, 4], 'float32').div(255).expandDims();
+              width: texWidth,
+              height: texHeight,
+              channels: 'RGB'
+            }, [texHeight, texWidth, 3], 'float32');
 
-            const prediction = model.predict(inputTensor).squeeze();
+            const resized = tf.image
+              .resizeBilinear(inputTensor, [224, 224])
+              .div(255)
+              .expandDims();
+
+            const prediction = model.predict(resized).squeeze();
             prediction.data().then(() => {
               tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
                 maskCanvas.width = window.innerWidth;
@@ -158,7 +166,7 @@
                 maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
                 maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-                tf.dispose([inputTensor, prediction]);
+                tf.dispose([inputTensor, resized, prediction]);
                 processingLock.busy = false;
 
                 const now = performance.now();
