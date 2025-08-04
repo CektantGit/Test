@@ -88,8 +88,16 @@
         await tf.setBackend('webgl');
         await tf.ready();
         gl = tf.backend().gl;
-        if (gl && gl.makeXRCompatible) {
-          await gl.makeXRCompatible();
+        if (gl && typeof gl.makeXRCompatible === 'function') {
+          try {
+            if (gl.canvas && typeof gl.canvas.addEventListener === 'function') {
+              await gl.makeXRCompatible();
+            } else {
+              log('Skipping XR compatibility: canvas lacks addEventListener');
+            }
+          } catch (err) {
+            log('XR compatibility error: ' + err.message);
+          }
         }
         log('Using WebGL backend');
         model = await tf.loadLayersModel('jsModel/model.json');
