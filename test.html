@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AR Real-time Segmentation (WebGLTexture Direct Input)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
@@ -17,38 +17,24 @@
       pointer-events: none;
       transform: rotate(180deg) scaleX(-1);
     }
-    #info {
+    #info, #glInfo {
       position: absolute;
-      bottom: 10px;
-      left: 10px;
-      color: white;
-      background: rgba(0,0,0,0.5);
-      padding: 6px;
       font-family: monospace;
       font-size: 12px;
-      z-index: 20;
-      white-space: pre-wrap;
       max-width: 90vw;
-    }
-    #glInfo {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      color: lime;
+      white-space: pre-wrap;
+      padding: 6px;
       background: rgba(0,0,0,0.6);
-      padding: 6px;
-      font-family: monospace;
-      font-size: 12px;
-      z-index: 21;
-      white-space: pre-wrap;
-      max-width: 90vw;
-      text-align: right;
+      color: white;
+      z-index: 20;
     }
+    #info { bottom: 10px; left: 10px; }
+    #glInfo { top: 10px; right: 10px; color: lime; }
     #startBtn {
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 15;
+      z-index: 30;
       padding: 10px;
       background: rgba(0,0,0,0.7);
       color: white;
@@ -65,8 +51,7 @@
   <div id="glInfo"></div>
 
   <script>
-    let model;
-    let gl, session, glBinding;
+    let model, gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     const tempCanvas = document.createElement('canvas');
@@ -93,16 +78,10 @@
         await tf.setBackend('custom-webgl');
         await tf.ready();
         log('Using custom WebGL backend');
-      } catch (e) {
-        log('Backend init failed: ' + e.message);
-        throw e;
-      }
-
-      try {
         model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded\n");
+        log("Model loaded");
       } catch (e) {
-        log('Model load failed: ' + e.message);
+        log('Load error: ' + e.message);
         throw e;
       }
     }
@@ -111,12 +90,12 @@
       try {
         log("Starting AR...");
 
-        const canvas = document.createElement('canvas');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        document.body.appendChild(canvas);
+        const renderCanvas = document.createElement('canvas');
+        renderCanvas.width = window.innerWidth;
+        renderCanvas.height = window.innerHeight;
+        document.body.appendChild(renderCanvas);
 
-        await loadModel(canvas);
+        await loadModel(renderCanvas);
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -156,8 +135,17 @@
               channels: 'RGB'
             };
 
-            const rawTensor = tf.tensor(webglData, [texHeight, texWidth, 3], 'float32');
-            const resized = tf.image.resizeBilinear(rawTensor, [224, 224]).div(255).expandDims();
+            let rawTensor;
+            try {
+              rawTensor = tf.tensor(webglData, [texHeight, texWidth, 3], 'float32');
+            } catch (err) {
+              log("TF Error: " + err.message);
+              processingLock.busy = false;
+              return;
+            }
+
+            const resized = tf.image.resizeBilinear(rawTensor, [224, 224])
+              .div(255).expandDims();
             const prediction = model.predict(resized).squeeze();
 
             prediction.data().then(() => {
@@ -192,11 +180,14 @@
       }
     }
 
-    window.onload = () => {
+    window.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('startBtn');
-      if (btn) btn.addEventListener('click', startAR);
-      else log('startBtn not found');
-    };
+      if (btn && typeof btn.addEventListener === 'function') {
+        btn.addEventListener('click', startAR);
+      } else {
+        log('startBtn is invalid or not found');
+      }
+    });
   </script>
 </body>
 </html>
