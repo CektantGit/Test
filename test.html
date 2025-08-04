@@ -54,8 +54,7 @@
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     const tempCanvas = new OffscreenCanvas(224, 224);
-    const tempCtx = tempCanvas.getContext('2d');
-    const processingLock = { busy: false };
+    let pixelBuffer = null;
     let fpsHistory = [];
 
     async function loadModel() {
@@ -105,20 +104,26 @@
 
       let lastFrameTime = performance.now();
 
-      session.requestAnimationFrame(function onFrame(time, frame) {
-        session.requestAnimationFrame(onFrame);
-        if (processingLock.busy) return;
-
+      async function onFrame(time, frame) {
         const pose = frame.getViewerPose(referenceSpace);
-        if (!pose) return;
+        if (!pose) {
+          session.requestAnimationFrame(onFrame);
+          return;
+        }
 
         const view = pose.views[0];
         const tex = glBinding.getCameraImage(view.camera);
-        if (!tex) return;
+        if (!tex) {
+          session.requestAnimationFrame(onFrame);
+          return;
+        }
 
-        processingLock.busy = true;
         const w = view.camera.width;
         const h = view.camera.height;
+        const size = w * h * 4;
+        if (!pixelBuffer || pixelBuffer.length !== size) {
+          pixelBuffer = new Uint8Array(size);
+        }
 
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
@@ -126,42 +131,53 @@
 
         const tPreStart = performance.now();
 
-        const pixels = new Uint8Array(w * h * 4);
-        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-        const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixelBuffer);
 
-        createImageBitmap(imageData).then(bitmap => {
-          tempCtx.drawImage(bitmap, 0, 0, 224, 224);
+        const input = tf.tidy(() =>
+          tf.browser
+            .fromPixels({ data: pixelBuffer, width: w, height: h })
+            .resizeBilinear([224, 224])
+            .toFloat()
+            .div(255)
+            .expandDims()
+        );
+        const tPreEnd = performance.now();
 
-          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
-          const tPreEnd = performance.now();
+        const prediction = model.predict(input).squeeze();
+        await prediction.data();
+        const tPredictEnd = performance.now();
 
-          const prediction = model.predict(input).squeeze();
+        const mask = tf.sub(1, prediction);
+        await tf.browser.toPixels(mask, tempCanvas);
+        const tPostEnd = performance.now();
 
-          prediction.data().then(() => {
-            const tPredictEnd = performance.now();
-            tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-              const tPostEnd = performance.now();
-              maskCanvas.width = window.innerWidth;
-              maskCanvas.height = window.innerHeight;
-              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
+        if (
+          maskCanvas.width !== window.innerWidth ||
+          maskCanvas.height !== window.innerHeight
+        ) {
+          maskCanvas.width = window.innerWidth;
+          maskCanvas.height = window.innerHeight;
+        }
+        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-              tf.dispose([input, prediction]);
-              processingLock.busy = false;
+        tf.dispose([input, prediction, mask]);
 
-              const now = performance.now();
-              const frameTime = now - lastFrameTime;
-              lastFrameTime = now;
-              fpsHistory.push(1000 / frameTime);
-              if (fpsHistory.length > 30) fpsHistory.shift();
-              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+        const now = performance.now();
+        const frameTime = now - lastFrameTime;
+        lastFrameTime = now;
+        fpsHistory.push(1000 / frameTime);
+        if (fpsHistory.length > 30) fpsHistory.shift();
+        const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-              log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
-            });
-          });
-        });
-      });
+        log(
+          `Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`
+        );
+
+        session.requestAnimationFrame(onFrame);
+      }
+
+      session.requestAnimationFrame(onFrame);
 
       document.getElementById('startBtn').style.display = 'none';
     }
