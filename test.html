@@ -119,10 +119,15 @@
 
         await loadModel();
 
+        // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
+        // OffscreenCanvas is not a DOM node and cannot be appended to the document,
+        // so only append when the canvas is an HTMLCanvasElement.
         const renderCanvas = gl.canvas;
-        renderCanvas.width = window.innerWidth;
-        renderCanvas.height = window.innerHeight;
-        document.body.appendChild(renderCanvas);
+        if (renderCanvas instanceof HTMLCanvasElement) {
+          renderCanvas.width = window.innerWidth;
+          renderCanvas.height = window.innerHeight;
+          document.body.appendChild(renderCanvas);
+        }
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
