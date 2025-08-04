@@ -357,7 +357,12 @@
       canvas.width = 224;
       canvas.height = 224;
       document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true });
+      // Preserve the drawing buffer so createImageBitmap captures the
+      // current camera frame instead of a cleared canvas.
+      gl = canvas.getContext('webgl', {
+        xrCompatible: true,
+        preserveDrawingBuffer: true
+      });
 
       try {
         session = await navigator.xr.requestSession('immersive-ar', {
