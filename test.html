@@ -230,9 +230,8 @@
         const bytesPerPixel = 4;
         const alignedBytesPerRow = Math.ceil((224 * bytesPerPixel) / 256) * 256;
 
-        const rowsPerImage = alignedBytesPerRow / bytesPerPixel;
         const readback = device.createBuffer({
-          size: alignedBytesPerRow * rowsPerImage,
+          size: alignedBytesPerRow * 224,
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         });
         encoder.copyTextureToBuffer(
@@ -240,7 +239,6 @@
           {
             buffer: readback,
             bytesPerRow: alignedBytesPerRow,
-            rowsPerImage,
           },
           { width: 224, height: 224, depthOrArrayLayers: 1 }
         );
