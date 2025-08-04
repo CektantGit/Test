@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AR Segmentation (Original Working Version)</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR Real-time Segmentation (WebGPU Optimized)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
   <style>
-    body { margin: 0; overflow: hidden; background: black; }
+    body { margin: 0; overflow: hidden; }
     #maskCanvas {
       position: fixed;
       top: 0; left: 0;
@@ -27,6 +27,7 @@
       font-family: monospace;
       font-size: 12px;
       z-index: 20;
+      white-space: pre-wrap;
     }
     #startBtn {
       position: absolute;
@@ -43,98 +44,122 @@
   </style>
 </head>
 <body>
-  <button id="startBtn">Start AR</button>
-  <canvas id="maskCanvas" width="224" height="224"></canvas>
+  <button id="startBtn">Start AR Segmentation</button>
+  <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
 
   <script>
-    let model, gl, session, glBinding;
+    let model;
+    let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     const tempCanvas = new OffscreenCanvas(224, 224);
     const tempCtx = tempCanvas.getContext('2d');
-    const fpsList = [];
+    const processingLock = { busy: false };
+    let fpsHistory = [];
 
     async function loadModel() {
-      await tf.setBackend('webgl');
-      await tf.ready();
-      model = await tf.loadLayersModel('./jsModel/model.json');
-      document.getElementById('info').textContent = '✅ Model loaded';
+      try {
+        await tf.setBackend('webgpu');
+        await tf.ready();
+        log('Using WebGPU backend\n');
+      } catch (e) {
+        log('WebGPU init failed, falling back to WebGL...');
+        await tf.setBackend('webgl');
+        await tf.ready();
+        log('Using WebGL backend\n');
+      }
+      try {
+        model = await tf.loadLayersModel('jsModel/model.json');
+        log("Model loaded\n");
+      } catch (e) {
+        log('Model load failed: ' + e.message);
+      }
+    }
+
+    function log(msg) {
+      document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
     async function startAR() {
+      log("Starting AR...");
       await loadModel();
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
       gl = canvas.getContext('webgl', { xrCompatible: true });
 
-      session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['camera-access', 'dom-overlay'],
-        domOverlay: { root: document.body }
-      });
+      try {
+        session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['camera-access', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        });
+      } catch (e) {
+        log('Failed to start AR session: ' + e.message);
+        return;
+      }
 
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-      const refSpace = await session.requestReferenceSpace('local');
+      const referenceSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
 
-      let lastTime = performance.now();
+      let lastFrameTime = performance.now();
 
       session.requestAnimationFrame(function onFrame(time, frame) {
         session.requestAnimationFrame(onFrame);
-        const pose = frame.getViewerPose(refSpace);
+        if (processingLock.busy) return;
+
+        const pose = frame.getViewerPose(referenceSpace);
         if (!pose) return;
 
         const view = pose.views[0];
         const tex = glBinding.getCameraImage(view.camera);
         if (!tex) return;
 
+        processingLock.busy = true;
+        const w = view.camera.width;
+        const h = view.camera.height;
+
         const fb = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-        const t0 = performance.now();
+        const tPreStart = performance.now();
 
-        const w = view.camera.width;
-        const h = view.camera.height;
         const pixels = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
         const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
 
-        createImageBitmap(imageData).then(async img => {
-          tempCtx.clearRect(0, 0, 224, 224);
-          tempCtx.drawImage(img, 0, 0, 224, 224);
+        createImageBitmap(imageData).then(bitmap => {
+          tempCtx.drawImage(bitmap, 0, 0, 224, 224);
 
-          const input = tf.tidy(() =>
-            tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims()
-          );
-          await tf.nextFrame();
-          const t1 = performance.now();
+          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const tPreEnd = performance.now();
 
-          const prediction = await model.predict(input);
-          await tf.nextFrame();
-          const t2 = performance.now();
+          const prediction = model.predict(input).squeeze();
 
-          const mask = tf.tidy(() =>
-            tf.sub(1, prediction.squeeze()).clipByValue(0, 1)
-          );
-          await tf.browser.toPixels(mask, maskCanvas);
-          mask.dispose();
-          tf.dispose([input, prediction]);
+          prediction.data().then(() => {
+            const tPredictEnd = performance.now();
+            tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+              const tPostEnd = performance.now();
+              maskCanvas.width = window.innerWidth;
+              maskCanvas.height = window.innerHeight;
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(tempCanvas.transferToImageBitmap(), 0, 0, maskCanvas.width, maskCanvas.height);
 
-          const t3 = performance.now();
-          const now = performance.now();
-          const delta = now - lastTime;
-          lastTime = now;
-          fpsList.push(1000 / delta);
-          if (fpsList.length > 30) fpsList.shift();
-          const avgFps = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;
+              tf.dispose([input, prediction]);
+              processingLock.busy = false;
 
-          document.getElementById('info').textContent =
-            `Pre: ${(t1 - t0).toFixed(1)}ms | ` +
-            `Infer: ${(t2 - t1).toFixed(1)}ms | ` +
-            `Post: ${(t3 - t2).toFixed(1)}ms | ` +
-            `FPS: ${avgFps.toFixed(1)}`;
+              const now = performance.now();
+              const frameTime = now - lastFrameTime;
+              lastFrameTime = now;
+              fpsHistory.push(1000 / frameTime);
+              if (fpsHistory.length > 30) fpsHistory.shift();
+              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+              log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+            });
+          });
         });
       });
 
@@ -142,14 +167,11 @@
     }
 
     document.getElementById('startBtn').addEventListener('click', () => {
-      if (!navigator.xr) {
-        alert('WebXR is not supported on this device/browser');
-        return;
+      try {
+        startAR();
+      } catch (e) {
+        log('Unexpected error: ' + e.message);
       }
-      startAR().catch(err => {
-        document.getElementById('info').textContent = '❌ Error: ' + err.message;
-        console.error(err);
-      });
     });
   </script>
 </body>
