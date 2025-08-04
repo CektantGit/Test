@@ -112,6 +112,7 @@
         queue = device.queue;
 
         preprocessPipeline = device.createComputePipeline({
+          layout: 'auto',
           compute: {
             module: device.createShaderModule({ code: PREPROCESS_WGSL }),
             entryPoint: 'main'
@@ -119,6 +120,7 @@
         });
 
         postprocessPipeline = device.createComputePipeline({
+          layout: 'auto',
           compute: {
             module: device.createShaderModule({ code: POSTPROCESS_WGSL }),
             entryPoint: 'main'
