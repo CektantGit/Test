@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AR Fast Inference (WebGL)</title>
+  <title>AR Fast Predict</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0"></script>
   <style>
     body { margin: 0; overflow: hidden; background: black; }
@@ -26,7 +26,6 @@
       font-family: monospace;
       font-size: 12px;
       z-index: 20;
-      white-space: pre-wrap;
     }
     #startBtn {
       position: absolute;
@@ -44,24 +43,23 @@
 </head>
 <body>
   <button id="startBtn">Start AR</button>
-  <canvas id="maskCanvas" width="224" height="224"></canvas>
+  <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
 
   <script>
     let model;
-    let gl, session, glBinding, referenceSpace;
-    const maskCanvas = document.getElementById('maskCanvas');
-    const maskCtx = maskCanvas.getContext('2d');
+    let session, gl, glBinding, referenceSpace;
     const cameraCanvas = new OffscreenCanvas(224, 224);
     const cameraCtx = cameraCanvas.getContext('2d');
+    const maskCanvas = document.getElementById('maskCanvas');
+    const maskCtx = maskCanvas.getContext('2d');
+    const info = document.getElementById('info');
     const processingLock = { busy: false };
-    let fpsHistory = [];
-    let lastFrameTime = performance.now();
 
     async function loadModel() {
       await tf.setBackend('webgl');
       await tf.ready();
-      console.log("Backend:", tf.getBackend());
+      console.log('✅ Backend:', tf.getBackend());
       model = await tf.loadLayersModel('jsModel/model.json');
     }
 
@@ -72,30 +70,21 @@
       document.body.appendChild(canvas);
       gl = canvas.getContext('webgl', { xrCompatible: true });
 
-      try {
-        session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['camera-access', 'dom-overlay'],
-          domOverlay: { root: document.body }
-        });
-      } catch (e) {
-        log('Failed to start AR: ' + e.message);
-        return;
-      }
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['camera-access', 'dom-overlay'],
+        domOverlay: { root: document.body }
+      });
 
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
       referenceSpace = await session.requestReferenceSpace('local');
       glBinding = new XRWebGLBinding(session, gl);
 
       requestNextFrame();
-      document.getElementById('startBtn').style.display = 'none';
+      document.getElementById('startBtn').remove();
     }
 
     function requestNextFrame() {
       session.requestAnimationFrame(onFrame);
-    }
-
-    function log(msg) {
-      document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
     function onFrame(time, frame) {
@@ -108,16 +97,14 @@
       const tex = glBinding.getCameraImage(view.camera);
       if (!tex) return requestNextFrame();
 
-      const frameData = { view, tex };
       processingLock.busy = true;
-
-      processFrame(frameData).then(() => {
+      processFrame(view, tex).then(() => {
         processingLock.busy = false;
         requestNextFrame();
       });
     }
 
-    async function processFrame({ view, tex }) {
+    async function processFrame(view, tex) {
       const w = view.camera.width;
       const h = view.camera.height;
 
@@ -127,51 +114,46 @@
 
       const pixels = new Uint8Array(w * h * 4);
       gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
       const imageData = new ImageData(pixels, w, h);
       const bitmap = await createImageBitmap(imageData);
-
-      // === Preprocess (as in video) ===
-      const t0 = performance.now();
       cameraCtx.drawImage(bitmap, 0, 0, 224, 224);
+
+      const t0 = performance.now();
+
       const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
-                                   .resizeBilinear([224, 224])
-                                   .div(255)
-                                   .expandDims();
+                                    .resizeBilinear([224, 224])
+                                    .div(255)
+                                    .expandDims();
+
+      const pred = model.predict(imageTensor);
+      const mask = pred.dataSync();  // 🔥 быстрый sync
+      tf.dispose([imageTensor, pred]);
+
       const t1 = performance.now();
 
-      // === Inference ===
-      const prediction = model.predict(imageTensor);
-      const unetMaskArray = prediction.dataSync(); // FAST
-      const t2 = performance.now();
-
-      tf.dispose([imageTensor, prediction]);
-
-      // === Postprocess (direct putImageData)
-      const maskImage = new ImageData(224, 224);
+      const img = new ImageData(224, 224);
       for (let i = 0; i < 224 * 224; i++) {
-        const v = 255 - (unetMaskArray[i] * 255) | 0;
+        const v = 255 - (mask[i] * 255) | 0;
         const j = i * 4;
-        maskImage.data[j] = v;
-        maskImage.data[j + 1] = v;
-        maskImage.data[j + 2] = v;
-        maskImage.data[j + 3] = 255;
+        img.data[j + 0] = v;
+        img.data[j + 1] = v;
+        img.data[j + 2] = v;
+        img.data[j + 3] = 255;
       }
 
+      maskCanvas.width = window.innerWidth;
+      maskCanvas.height = window.innerHeight;
       maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-      maskCtx.putImageData(maskImage, 0, 0);
+      maskCtx.putImageData(img, 0, 0);
 
-      const t3 = performance.now();
-      const fps = 1000 / (t3 - lastFrameTime);
-      lastFrameTime = t3;
-
-      fpsHistory.push(fps);
-      if (fpsHistory.length > 30) fpsHistory.shift();
-      const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-      log(`Pre: ${(t1 - t0).toFixed(1)}ms\nInfer: ${(t2 - t1).toFixed(1)}ms\nPost: ${(t3 - t2).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+      const fps = (1000 / (t1 - t0)).toFixed(1);
+      info.textContent = `Infer: ${(t1 - t0).toFixed(1)}ms | FPS: ${fps}`;
     }
 
-    document.getElementById('startBtn').addEventListener('click', startAR);
+    document.getElementById('startBtn').addEventListener('click', () => {
+      startAR().catch(err => info.textContent = "Error: " + err.message);
+    });
   </script>
 </body>
 </html>
