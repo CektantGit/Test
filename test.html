@@ -55,6 +55,7 @@
     const maskCtx = maskCanvas.getContext('2d');
     const tempCanvas = new OffscreenCanvas(224, 224);
     let pixelBuffer = null;
+    let framebuffer = null;
     let fpsHistory = [];
 
     async function loadModel() {
@@ -125,8 +126,8 @@
           pixelBuffer = new Uint8Array(size);
         }
 
-        const fb = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        if (!framebuffer) framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
         const tPreStart = performance.now();
@@ -134,20 +135,23 @@
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixelBuffer);
 
         const input = tf.tidy(() =>
-          tf.browser
-            .fromPixels({ data: pixelBuffer, width: w, height: h })
+          tf.tensor(pixelBuffer, [h, w, 4])
+            .slice([0, 0, 0], [h, w, 3])
             .resizeBilinear([224, 224])
             .toFloat()
-            .div(255)
+            .mul(1 / 255)
             .expandDims()
         );
         const tPreEnd = performance.now();
 
-        const prediction = model.predict(input).squeeze();
-        await prediction.data();
+        const tPredictStart = performance.now();
+        const mask = tf.tidy(() => {
+          const pred = model.predict(input);
+          return tf.sub(1, pred.squeeze());
+        });
+        await tf.nextFrame();
         const tPredictEnd = performance.now();
 
-        const mask = tf.sub(1, prediction);
         await tf.browser.toPixels(mask, tempCanvas);
         const tPostEnd = performance.now();
 
@@ -161,7 +165,7 @@
         maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
         maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-        tf.dispose([input, prediction, mask]);
+        tf.dispose([input, mask]);
 
         const now = performance.now();
         const frameTime = now - lastFrameTime;
@@ -171,7 +175,7 @@
         const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
         log(
-          `Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`
+          `Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPredictStart).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`
         );
 
         session.requestAnimationFrame(onFrame);
