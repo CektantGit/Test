@@ -69,6 +69,10 @@
     let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 224;
+    tempCanvas.height = 224;
+    const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
     let fpsHistory = [];
 
@@ -135,6 +139,9 @@
 
             const view = pose.views[0];
             const tex = glBinding.getCameraImage(view.camera);
+            const texWidth = view.camera.width;
+            const texHeight = view.camera.height;
+
             if (!tex) {
               logGLInfo("Camera texture is null");
               return;
@@ -144,16 +151,23 @@
 
             const webglData = {
               texture: tex,
-              height: 224,
-              width: 224,
-              channels: 'RGBA'
+              width: texWidth,
+              height: texHeight,
+              channels: 'RGB'
             };
 
-            const inputTensor = tf.tensor(webglData, [224, 224, 4], 'float32').div(255).expandDims();
-            const prediction = model.predict(inputTensor).squeeze();
+            const rawTensor = tf.tensor(webglData, [texHeight, texWidth, 3], 'float32');
+            const resized = tf.image.resizeBilinear(rawTensor, [224, 224]).div(255).expandDims();
+            const prediction = model.predict(resized).squeeze();
+
             prediction.data().then(() => {
-              tf.browser.toPixels(tf.sub(1, prediction), maskCanvas).then(() => {
-                tf.dispose([inputTensor, prediction]);
+              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+                maskCanvas.width = window.innerWidth;
+                maskCanvas.height = window.innerHeight;
+                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+
+                tf.dispose([rawTensor, resized, prediction]);
                 processingLock.busy = false;
 
                 const now = performance.now();
@@ -178,7 +192,11 @@
       }
     }
 
-    document.getElementById('startBtn').addEventListener('click', startAR);
+    window.onload = () => {
+      const btn = document.getElementById('startBtn');
+      if (btn) btn.addEventListener('click', startAR);
+      else log('startBtn not found');
+    };
   </script>
 </body>
 </html>
