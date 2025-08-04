@@ -57,7 +57,6 @@
     const modelUrl = 'https://vizbl-1.s3.eu-central-1.amazonaws.com/native/b617533f-d965-4782-8d22-c0574541b809.glb?version=1';
     const gltfLoader = new GLTFLoader();
     let gltfModel;
-    const modelPromise = gltfLoader.loadAsync(modelUrl).then(g => g.scene).catch(e => { log('Model load error: ' + e.message); });
 
       let model, gl, session, glBinding;
     let processingLock, fpsHistory;
@@ -202,21 +201,6 @@
           }
         }
         log('Using WebGL backend');
-        renderer3D = new THREE.WebGLRenderer({ context: gl, alpha: true });
-        renderer3D.autoClear = false;
-        scene3D = new THREE.Scene();
-        camera3D = new THREE.PerspectiveCamera();
-        camera3D.matrixAutoUpdate = false;
-        applyMask = new MaskStep(renderer3D);
-
-        modelPromise.then(scene => {
-          if (scene) {
-            gltfModel = scene;
-            gltfModel.position.set(0, -1, 0);
-            scene3D.add(gltfModel);
-          }
-        });
-
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded");
       } catch (e) {
@@ -231,6 +215,22 @@
 
         await loadModel();
 
+        session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['camera-access', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        });
+
+        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+        const referenceSpace = await session.requestReferenceSpace('local');
+        glBinding = new XRWebGLBinding(session, gl);
+
+        renderer3D = new THREE.WebGLRenderer({ context: gl, alpha: true });
+        renderer3D.autoClear = false;
+        scene3D = new THREE.Scene();
+        camera3D = new THREE.PerspectiveCamera();
+        camera3D.matrixAutoUpdate = false;
+        applyMask = new MaskStep(renderer3D);
+
         // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
         // OffscreenCanvas is not a DOM node and cannot be appended to the document,
         // so only append when the canvas is an HTMLCanvasElement.
@@ -241,14 +241,14 @@
           document.body.appendChild(renderCanvas);
         }
 
-        session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['camera-access', 'dom-overlay'],
-          domOverlay: { root: document.body }
-        });
-
-        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-        const referenceSpace = await session.requestReferenceSpace('local');
-        glBinding = new XRWebGLBinding(session, gl);
+        try {
+          const gltf = await gltfLoader.loadAsync(modelUrl);
+          gltfModel = gltf.scene;
+          gltfModel.position.set(0, -1, 0);
+          scene3D.add(gltfModel);
+        } catch (e) {
+          log('Model load error: ' + e.message);
+        }
 
         let lastFrameTime = performance.now();
 

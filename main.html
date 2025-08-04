@@ -88,8 +88,10 @@
         scene.add(reticle);
       });
 
-      loader.load('https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf', (gltf) => {
+      loader.load('https://vizbl-1.s3.eu-central-1.amazonaws.com/native/b617533f-d965-4782-8d22-c0574541b809.glb?version=1', (gltf) => {
         flower = gltf.scene;
+        flower.position.set(0, -1, 0);
+        scene.add(flower);
       });
 
       const onXRFrame = async (time, frame) => {
