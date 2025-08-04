@@ -87,8 +87,11 @@
 
     async function loadModel() {
       try {
-        const customCanvas = document.createElement('canvas');
-        const customBackend = new tf.MathBackendWebGL(customCanvas);
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const glCtx = canvas.getContext('webgl');
+        const customBackend = new tf.MathBackendWebGL(glCtx);
         tf.registerBackend('custom-webgl', () => customBackend);
         await tf.setBackend('custom-webgl');
         await tf.ready();
@@ -146,23 +149,55 @@
 
             processingLock.busy = true;
 
-            try {
-              const fb = gl.createFramebuffer();
-              gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-              gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            const w = view.camera.width;
+            const h = view.camera.height;
 
-              const attachment = gl.getFramebufferAttachmentParameter(
-                gl.FRAMEBUFFER,
-                gl.COLOR_ATTACHMENT0,
-                gl.FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE
-              );
-              logGLInfo("Framebuffer attachment type: " + attachment);
-            } catch (err) {
-              logGLInfo("GL param read failed: " + err.message);
-            }
+            const fb = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-            log("TF Error: The texture is invalid. (Simulated here for debug)");
-            processingLock.busy = false;
+            const logicalShape = [224, 224, 3];
+            const tensor = tf.tensor({
+              texture: tex,
+              height: 224,
+              width: 224,
+              channels: 'RGB'
+            }, logicalShape, 'float32');
+
+            const tPreStart = performance.now();
+            const input = tensor.div(255.0).expandDims();
+            const tPreEnd = performance.now();
+
+            const prediction = model.predict(input).squeeze();
+            prediction.data().then(() => {
+              const tPredictEnd = performance.now();
+              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+                const tPostEnd = performance.now();
+
+                maskCanvas.width = window.innerWidth;
+                maskCanvas.height = window.innerHeight;
+                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+
+                tf.dispose([input, prediction, tensor]);
+                processingLock.busy = false;
+
+                const now = performance.now();
+                const frameTime = now - lastFrameTime;
+                lastFrameTime = now;
+                fpsHistory.push(1000 / frameTime);
+                if (fpsHistory.length > 30) fpsHistory.shift();
+                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+                log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+              }).catch(err => {
+                log("Postprocess error: " + err.message);
+                processingLock.busy = false;
+              });
+            }).catch(err => {
+              log("Prediction error: " + err.message);
+              processingLock.busy = false;
+            });
           } catch (err) {
             log("Frame error: " + err.message);
             processingLock.busy = false;
