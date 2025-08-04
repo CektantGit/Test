@@ -57,7 +57,6 @@
     const modelUrl = 'https://vizbl-1.s3.eu-central-1.amazonaws.com/native/b617533f-d965-4782-8d22-c0574541b809.glb?version=1';
     const gltfLoader = new GLTFLoader();
     let gltfModel;
-    const modelPromise = gltfLoader.loadAsync(modelUrl).then(g => g.scene).catch(e => { log('Model load error: ' + e.message); });
 
       let model, gl, session, glBinding;
     let processingLock, fpsHistory;
@@ -209,14 +208,6 @@
         camera3D.matrixAutoUpdate = false;
         applyMask = new MaskStep(renderer3D);
 
-        modelPromise.then(scene => {
-          if (scene) {
-            gltfModel = scene;
-            gltfModel.position.set(0, -1, 0);
-            scene3D.add(gltfModel);
-          }
-        });
-
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded");
       } catch (e) {
@@ -230,6 +221,15 @@
         log("Starting AR...");
 
         await loadModel();
+
+        try {
+          const gltf = await gltfLoader.loadAsync(modelUrl);
+          gltfModel = gltf.scene;
+          gltfModel.position.set(0, -1, 0);
+          scene3D.add(gltfModel);
+        } catch (e) {
+          log('Model load error: ' + e.message);
+        }
 
         // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
         // OffscreenCanvas is not a DOM node and cannot be appended to the document,
