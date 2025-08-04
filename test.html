@@ -3,23 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AR Real-time Segmentation (WebGPU Output)</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
+  <title>AR Real-time Segmentation (WebGLTexture Direct Input)</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
     body { margin: 0; overflow: hidden; }
-    #info {
+    #maskCanvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+      pointer-events: none;
+      transform: rotate(180deg) scaleX(-1);
+    }
+    #info, #glInfo {
       position: absolute;
       font-family: monospace;
       font-size: 12px;
+      max-width: 90vw;
       white-space: pre-wrap;
       padding: 6px;
       background: rgba(0,0,0,0.6);
       color: white;
-      bottom: 10px;
-      left: 10px;
       z-index: 20;
     }
+    #info { bottom: 10px; left: 10px; }
+    #glInfo { top: 10px; right: 10px; color: lime; }
     #startBtn {
       position: absolute;
       top: 10px;
@@ -36,124 +46,214 @@
 </head>
 <body>
   <button id="startBtn">Start AR Segmentation</button>
+  <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
+  <div id="glInfo"></div>
 
-  <script type="module">
-    import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js';
-    import '@tensorflow/tfjs-backend-webgpu';
+  <script>
+    // Global state variables. They are initialized only after the DOM is
+    // fully ready to avoid accessing elements before they exist.
+      let model, gl, session, glBinding;
+      let maskCanvas, maskCtx;
+    let processingLock, fpsHistory;
 
-    const VERTEX_SHADER = `
-      @vertex
-      fn main(@builtin(vertex_index) VertexIndex: u32) -> @builtin(position) vec4<f32> {
-        var pos = array<vec2<f32>, 6>(
-          vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0),
-          vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(1.0, 1.0)
+    function log(msg) {
+      console.error(msg);
+      document.getElementById('info').textContent = "Status:\n" + msg;
+    }
+
+    function logGLInfo(msg) {
+      document.getElementById('glInfo').textContent = msg;
+    }
+
+    // Convert the AR camera WebGL texture directly into a 224x224 tensor
+    // without syncing through the CPU. The AR camera provides an RGBA texture,
+    // so we select only the RGB channels. The texture's pixels are already
+    // normalized floats in [0,1], so no additional scaling is required.
+    function preprocessTexture(tex, width, height) {
+      return tf.tidy(() => {
+        const rgb = tf.tensor(
+          { texture: tex, width, height, channels: 'RGB' },
+          [height, width, 3],
+          'float32'
         );
-        return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
-      }`;
+        return tf.image.resizeBilinear(rgb, [224, 224])
+          .expandDims();
+      });
+    }
 
-    const FRAGMENT_SHADER = `
-      @group(0) @binding(0) var<uniform> size: vec2<i32>;
-      @group(0) @binding(1) var<storage, read> maskData: array<f32>;
-
-      @fragment
-      fn main(@builtin(position) coord: vec4<f32>) -> @location(0) vec4<f32> {
-        let x = i32(coord.x);
-        let y = i32(coord.y);
-        if (x >= size.x || y >= size.y) {
-          return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    async function loadModel() {
+      try {
+        await tf.setBackend('webgl');
+        await tf.ready();
+        const backend = tf.backend();
+        gl = backend?.getGPGPUContext?.().gl || backend?.gpgpu?.gl || backend?.gl;
+        if (!gl) {
+          throw new Error('Failed to obtain WebGL context');
         }
-        let i = y * size.x + x;
-        let v = 1.0 - maskData[i];
-        return vec4<f32>(v, v, v, 1.0);
-      }`;
-
-    let canvas, device, context, pipeline, sizeBuffer, maskBuffer, bindGroup;
-
-    async function setupWebGPU(width, height) {
-      canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      canvas.style.position = 'fixed';
-      canvas.style.top = '0';
-      canvas.style.left = '0';
-      canvas.style.zIndex = '10';
-      canvas.style.pointerEvents = 'none';
-      document.body.appendChild(canvas);
-
-      const adapter = await navigator.gpu.requestAdapter();
-      device = await adapter.requestDevice();
-
-      context = canvas.getContext('webgpu');
-      const format = navigator.gpu.getPreferredCanvasFormat();
-      context.configure({ device, format });
-
-      const vertexModule = device.createShaderModule({ code: VERTEX_SHADER });
-      const fragmentModule = device.createShaderModule({ code: FRAGMENT_SHADER });
-
-      pipeline = device.createRenderPipeline({
-        layout: 'auto',
-        vertex: { module: vertexModule, entryPoint: 'main' },
-        fragment: { module: fragmentModule, entryPoint: 'main', targets: [{ format }] },
-        primitive: { topology: 'triangle-list' },
-      });
-
-      sizeBuffer = device.createBuffer({
-        size: 2 * Int32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      });
-
-      maskBuffer = device.createBuffer({
-        size: 224 * 224 * Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      });
-
-      bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: sizeBuffer } },
-          { binding: 1, resource: { buffer: maskBuffer } },
-        ]
-      });
+        if (typeof gl.makeXRCompatible === 'function') {
+          try {
+            if (gl.canvas && typeof gl.canvas.addEventListener === 'function') {
+              await gl.makeXRCompatible();
+            } else {
+              log('Skipping XR compatibility: canvas lacks addEventListener');
+            }
+          } catch (err) {
+            log('XR compatibility error: ' + err.message);
+          }
+        }
+        log('Using WebGL backend');
+        model = await tf.loadLayersModel('jsModel/model.json');
+        log("Model loaded");
+      } catch (e) {
+        log('Load error: ' + e.message);
+        throw e;
+      }
     }
 
-    async function renderMaskGPU(data) {
-      device.queue.writeBuffer(sizeBuffer, 0, new Int32Array([224, 224]));
-      device.queue.writeBuffer(maskBuffer, 0, new Float32Array(data));
+    async function startAR() {
+      try {
+        log("Starting AR...");
 
-      const encoder = device.createCommandEncoder();
-      const pass = encoder.beginRenderPass({
-        colorAttachments: [{
-          view: context.getCurrentTexture().createView(),
-          loadOp: 'clear',
-          storeOp: 'store',
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        }]
-      });
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.draw(6);
-      pass.end();
-      device.queue.submit([encoder.finish()]);
+        await loadModel();
+
+        // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
+        // OffscreenCanvas is not a DOM node and cannot be appended to the document,
+        // so only append when the canvas is an HTMLCanvasElement.
+        const renderCanvas = gl.canvas;
+        if (renderCanvas instanceof HTMLCanvasElement) {
+          renderCanvas.width = window.innerWidth;
+          renderCanvas.height = window.innerHeight;
+          document.body.appendChild(renderCanvas);
+        }
+
+        session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['camera-access', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        });
+
+        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+        const referenceSpace = await session.requestReferenceSpace('local');
+        glBinding = new XRWebGLBinding(session, gl);
+
+        let lastFrameTime = performance.now();
+
+        async function onFrame(time, frame) {
+          session.requestAnimationFrame(onFrame);
+          if (processingLock.busy) return;
+          const preprocessStart = performance.now();
+
+          try {
+            const pose = frame.getViewerPose(referenceSpace);
+            if (!pose) return;
+
+            const view = pose.views[0];
+            const tex = glBinding.getCameraImage(view.camera);
+            const texWidth = view.camera.width;
+            const texHeight = view.camera.height;
+
+            if (!tex) {
+              logGLInfo("Camera texture is null");
+              return;
+            }
+
+            processingLock.busy = true;
+
+            
+            let inputTensor;
+            try {
+              inputTensor = preprocessTexture(tex, texWidth, texHeight);
+            } catch (err) {
+              log("TF Error: " + err.message);
+              processingLock.busy = false;
+              return;
+            }
+            const preprocessTime = performance.now() - preprocessStart;
+
+              const inferenceStart = performance.now();
+              const prediction = model.predict(inputTensor).squeeze();
+              await tf.nextFrame();
+              const inferenceTime = performance.now() - inferenceStart;
+              const postStart = performance.now();
+              const unetMaskArray = prediction.dataSync();
+
+              
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              const maskImageData = maskCtx.createImageData(224, 224);
+
+              for (let y = 0; y < 224; y++) {
+                for (let x = 0; x < 224; x++) {
+                  const value = unetMaskArray[y * 224 + x] * 255;
+                  const idx = (y * 224 + x) * 4;
+                  maskImageData.data[idx + 0] = 255 - value;
+                  maskImageData.data[idx + 1] = 255 - value;
+                  maskImageData.data[idx + 2] = 255 - value;
+                  maskImageData.data[idx + 3] = 255 - value;
+                }
+              }
+
+              maskCtx.putImageData(maskImageData, 0, 0);
+              const postTime = performance.now() - postStart;
+
+            tf.dispose([inputTensor, prediction]);
+            processingLock.busy = false;
+
+            const now = performance.now();
+            const frameTime = now - lastFrameTime;
+            lastFrameTime = now;
+            fpsHistory.push(1000 / frameTime);
+            if (fpsHistory.length > 30) fpsHistory.shift();
+            const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+            document.getElementById('info').textContent =
+              `Preprocess: ${preprocessTime.toFixed(1)} ms\n` +
+              `Inference: ${inferenceTime.toFixed(1)} ms\n` +
+              `Postprocess: ${postTime.toFixed(1)} ms\n` +
+              `FPS: ${avgFps.toFixed(1)}`;
+          } catch (err) {
+            log("Frame error: " + err.message);
+            processingLock.busy = false;
+          }
+        }
+
+        session.requestAnimationFrame(onFrame);
+        document.getElementById('startBtn').style.display = 'none';
+      } catch (e) {
+        log('Unexpected error: ' + e.message);
+      }
     }
 
-    async function runSegmentation() {
-      await tf.setBackend('webgpu');
-      await tf.ready();
-      const model = await tf.loadLayersModel('jsModel/model.json');
-      const input = tf.zeros([1, 224, 224, 3]);
-      const output = model.predict(input).squeeze();
-      const data = await output.data();
-      await setupWebGPU(224, 224);
-      await renderMaskGPU(data);
-      document.getElementById('info').textContent = 'Segmentation complete.';
+    // Initialize DOM-dependent variables and attach the start button handler
+    // once the document is ready. This ensures nothing runs before the user
+    // explicitly clicks the button.
+    function init() {
+      maskCanvas = document.getElementById('maskCanvas');
+      if (!maskCanvas) {
+        log('maskCanvas is invalid or not found');
+        return;
+      }
+      maskCtx = maskCanvas.getContext('2d');
+      maskCanvas.width = 224;
+      maskCanvas.height = 224;
+
+      processingLock = { busy: false };
+      fpsHistory = [];
+
+      const btn = document.getElementById('startBtn');
+      if (!btn || typeof btn.addEventListener !== 'function') {
+        log('startBtn is invalid or not found');
+        return;
+      }
+
+      // Attach handler only after confirming the button exists to avoid
+      // "a.addEventListener is not a function" errors.
+      btn.addEventListener('click', startAR, { once: true });
     }
 
-    document.getElementById('startBtn').addEventListener('click', async () => {
-      document.getElementById('info').textContent = 'Running...';
-      await runSegmentation();
-      document.getElementById('startBtn').style.display = 'none';
-    });
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
