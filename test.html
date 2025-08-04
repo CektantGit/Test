@@ -82,6 +82,7 @@
     }
 
     function logGLInfo(msg) {
+      console.log("[GL]", msg);
       document.getElementById('glInfo').textContent = msg;
     }
 
@@ -139,7 +140,10 @@
 
             const view = pose.views[0];
             const tex = glBinding.getCameraImage(view.camera);
-            if (!tex) return;
+            if (!tex) {
+              logGLInfo("Camera texture is null");
+              return;
+            }
 
             processingLock.busy = true;
 
@@ -152,56 +156,21 @@
               const internalFormat = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_INTERNAL_FORMAT);
               const type = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_TYPE);
               const format = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_FORMAT);
+
               logGLInfo("AR Texture Info:\n" +
                          "InternalFormat: " + internalFormat + "\n" +
                          "Type: " + type + "\n" +
                          "Format: " + format);
             } catch (err) {
-              log("Texture format read error: " + err.message);
+              logGLInfo("GL param read failed: " + err.message);
             }
 
-            const logicalShape = [224, 224, 3];
-            const tensor = tf.tensor({
-              texture: tex,
-              height: 224,
-              width: 224,
-              channels: 'RGB'
-            }, logicalShape, 'float32');
+            // HERE: If texture still invalid, print texture object
+            console.warn("[DEBUG] tex:", tex);
 
-            const tPreStart = performance.now();
-            const input = tensor.div(255).expandDims();
-            const tPreEnd = performance.now();
-
-            const prediction = model.predict(input).squeeze();
-            prediction.data().then(() => {
-              const tPredictEnd = performance.now();
-              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-                const tPostEnd = performance.now();
-
-                maskCanvas.width = window.innerWidth;
-                maskCanvas.height = window.innerHeight;
-                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-
-                tf.dispose([input, prediction, tensor]);
-                processingLock.busy = false;
-
-                const now = performance.now();
-                const frameTime = now - lastFrameTime;
-                lastFrameTime = now;
-                fpsHistory.push(1000 / frameTime);
-                if (fpsHistory.length > 30) fpsHistory.shift();
-                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-                log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
-              }).catch(err => {
-                log("Postprocess error: " + err.message);
-                processingLock.busy = false;
-              });
-            }).catch(err => {
-              log("Prediction error: " + err.message);
-              processingLock.busy = false;
-            });
+            // This is placeholder; original path that leads to TF error goes here
+            log("TF Error: The texture is invalid. (Simulated here for debug)");
+            processingLock.busy = false;
           } catch (err) {
             log("Frame error: " + err.message);
             processingLock.busy = false;
