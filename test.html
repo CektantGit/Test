@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AR Real-time Segmentation (WebGLTexture Direct Input)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <style>
     body { margin: 0; overflow: hidden; }
     #maskCanvas {
@@ -84,14 +83,15 @@
       });
     }
 
-    async function loadModel(canvas) {
+    async function loadModel() {
       try {
-        gl = canvas.getContext('webgl', { xrCompatible: true });
-        const backend = new tf.MathBackendWebGL(gl);
-        tf.registerBackend('custom-webgl', () => backend);
-        await tf.setBackend('custom-webgl');
+        await tf.setBackend('webgl');
         await tf.ready();
-        log('Using custom WebGL backend');
+        gl = tf.backend().gl;
+        if (gl && gl.makeXRCompatible) {
+          await gl.makeXRCompatible();
+        }
+        log('Using WebGL backend');
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded");
       } catch (e) {
@@ -104,12 +104,12 @@
       try {
         log("Starting AR...");
 
-        const renderCanvas = document.createElement('canvas');
+        await loadModel();
+
+        const renderCanvas = gl.canvas;
         renderCanvas.width = window.innerWidth;
         renderCanvas.height = window.innerHeight;
         document.body.appendChild(renderCanvas);
-
-        await loadModel(renderCanvas);
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
