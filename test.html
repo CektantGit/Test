@@ -42,11 +42,21 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    #inputView {
+      position: absolute;
+      top: 60px;
+      left: 10px;
+      width: 112px;
+      height: 112px;
+      z-index: 25;
+      border: 1px solid red;
+    }
   </style>
 </head>
 <body>
   <button id="startBtn">Start AR Segmentation</button>
   <canvas id="maskCanvas"></canvas>
+  <canvas id="inputView"></canvas>
   <div id="info">Status: idle</div>
   <div id="glInfo"></div>
 
@@ -54,7 +64,7 @@
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
     let model, gl, session, glBinding;
-    let maskCanvas, maskCtx, tempCanvas;
+    let maskCanvas, maskCtx, tempCanvas, inputView;
     let processingLock, fpsHistory;
 
     function log(msg) {
@@ -170,26 +180,29 @@
             }
 
             const prediction = model.predict(inputTensor).squeeze();
+            const mask = tf.sub(1, prediction);
+            const preview = inputTensor.squeeze();
+            const previewForCanvas = preview.mul(255);
 
-            prediction.data().then(() => {
-              const mask = tf.sub(1, prediction);
-              tf.browser.toPixels(mask, tempCanvas).then(() => {
-                maskCanvas.width = window.innerWidth;
-                maskCanvas.height = window.innerHeight;
-                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+            Promise.all([
+              tf.browser.toPixels(mask, tempCanvas),
+              tf.browser.toPixels(previewForCanvas, inputView)
+            ]).then(() => {
+              maskCanvas.width = window.innerWidth;
+              maskCanvas.height = window.innerHeight;
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-                tf.dispose([inputTensor, prediction, mask]);
-                processingLock.busy = false;
+              tf.dispose([inputTensor, prediction, mask, preview, previewForCanvas]);
+              processingLock.busy = false;
 
-                const now = performance.now();
-                const frameTime = now - lastFrameTime;
-                lastFrameTime = now;
-                fpsHistory.push(1000 / frameTime);
-                if (fpsHistory.length > 30) fpsHistory.shift();
-                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-                log(`FPS: ${avgFps.toFixed(1)}`);
-              });
+              const now = performance.now();
+              const frameTime = now - lastFrameTime;
+              lastFrameTime = now;
+              fpsHistory.push(1000 / frameTime);
+              if (fpsHistory.length > 30) fpsHistory.shift();
+              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+              log(`FPS: ${avgFps.toFixed(1)}`);
             });
           } catch (err) {
             log("Frame error: " + err.message);
@@ -218,6 +231,14 @@
       tempCanvas = document.createElement('canvas');
       tempCanvas.width = 224;
       tempCanvas.height = 224;
+
+      inputView = document.getElementById('inputView');
+      if (!inputView) {
+        log('inputView is invalid or not found');
+        return;
+      }
+      inputView.width = 224;
+      inputView.height = 224;
 
       processingLock = { busy: false };
       fpsHistory = [];
