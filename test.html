@@ -50,7 +50,9 @@
 
   <script>
     let model;
-    let gl, session;
+    let gl, session, glBinding;
+    let cameraProgram, positionBuffer, texCoordBuffer;
+    let posLoc, texLoc, samplerLoc;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
     let fpsHistory = [];
@@ -71,6 +73,49 @@
     window.addEventListener('unhandledrejection', e => {
       log(`Unhandled: ${e.reason}`);
     });
+
+    function initCameraQuad(gl) {
+      const vsSource = `attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord; void main() { vTexCoord = aTexCoord; gl_Position = vec4(aPosition, 0.0, 1.0); }`;
+      const fsSource = `#extension GL_OES_EGL_image_external : require\nprecision mediump float; varying vec2 vTexCoord; uniform samplerExternalOES uSampler; void main() { gl_FragColor = texture2D(uSampler, vTexCoord); }`;
+      const vs = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs, vsSource);
+      gl.compileShader(vs);
+      const fs = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs, fsSource);
+      gl.compileShader(fs);
+      cameraProgram = gl.createProgram();
+      gl.attachShader(cameraProgram, vs);
+      gl.attachShader(cameraProgram, fs);
+      gl.linkProgram(cameraProgram);
+      posLoc = gl.getAttribLocation(cameraProgram, 'aPosition');
+      texLoc = gl.getAttribLocation(cameraProgram, 'aTexCoord');
+      samplerLoc = gl.getUniformLocation(cameraProgram, 'uSampler');
+      positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      texCoordBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]), gl.STATIC_DRAW);
+      gl.getExtension('OES_EGL_image_external');
+    }
+
+    function drawCameraFrame(frame) {
+      const cameraTex = glBinding.getCameraImage(frame);
+      if (!cameraTex) return false;
+      gl.useProgram(cameraProgram);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, cameraTex);
+      gl.uniform1i(samplerLoc, 0);
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+      gl.enableVertexAttribArray(texLoc);
+      gl.vertexAttribPointer(texLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return true;
+    }
 
     // WebGPU resources for fully GPU-based pre/post processing
     const PREPROCESS_WGSL = `
@@ -325,6 +370,8 @@
       }
 
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+      glBinding = new XRWebGLBinding(session, gl);
+      initCameraQuad(gl);
       const referenceSpace = await session.requestReferenceSpace('local');
 
       let lastFrameTime = performance.now();
@@ -332,6 +379,12 @@
       async function onFrame(time, frame) {
         const pose = frame.getViewerPose(referenceSpace);
         if (!pose) {
+          session.requestAnimationFrame(onFrame);
+          return;
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+        if (!drawCameraFrame(frame)) {
           session.requestAnimationFrame(onFrame);
           return;
         }
@@ -347,6 +400,8 @@
         const tPreStart = performance.now();
         const input = await preprocess(tex);
         tex.close();
+        const meanVal = (await input.mean().data())[0];
+        log('input mean ' + meanVal.toFixed(3));
         const tPreEnd = performance.now();
 
         const tPredictStart = performance.now();
