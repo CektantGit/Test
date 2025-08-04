@@ -139,9 +139,9 @@
         let lastFrameTime = performance.now();
 
         async function onFrame(time, frame) {
-          session.requestAnimationFrame(onFrame);
+          
           if (processingLock.busy) return;
-          processingLock.busy = true;
+          
 
           try {
             const pose = frame.getViewerPose(referenceSpace);
@@ -213,6 +213,7 @@
           } catch (err) {
             log("Frame error: " + err.message);
             processingLock.busy = false;
+            session.requestAnimationFrame(onFrame);
           }
         }
 
