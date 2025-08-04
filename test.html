@@ -227,14 +227,31 @@
         hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
         glBinding = new XRWebGLBinding(session, gl);
 
-        renderer3D = new THREE.WebGLRenderer({ context: gl, alpha: true });
+        const canvas = gl.canvas;
+        // Set up the WebGLRenderer, which handles rendering to the session's base layer.
+        renderer3D = new THREE.WebGLRenderer({
+          alpha: true,
+          preserveDrawingBuffer: true,
+          canvas: canvas,
+          context: gl
+        });
         renderer3D.autoClear = false;
         scene3D = new THREE.Scene();
         const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
         scene3D.add(hemiLight);
+        // The API directly updates the camera matrices.
+        // Disable matrix auto updates so three.js doesn't attempt
+        // to handle the matrices independently.
         camera3D = new THREE.PerspectiveCamera();
         camera3D.matrixAutoUpdate = false;
         applyMask = new MaskStep(renderer3D);
+
+        // Add a simple cube so there's always visible 3D content
+        const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        const material = new THREE.MeshNormalMaterial();
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(0, 0, -0.5);
+        scene3D.add(cube);
 
         gltfLoader.load('https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf', (gltf) => {
           reticle = gltf.scene;
@@ -245,11 +262,10 @@
         // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
         // OffscreenCanvas is not a DOM node and cannot be appended to the document,
         // so only append when the canvas is an HTMLCanvasElement.
-        const renderCanvas = gl.canvas;
-        if (renderCanvas instanceof HTMLCanvasElement) {
-          renderCanvas.width = window.innerWidth;
-          renderCanvas.height = window.innerHeight;
-          document.body.appendChild(renderCanvas);
+        if (canvas instanceof HTMLCanvasElement) {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+          document.body.appendChild(canvas);
         }
 
         try {
