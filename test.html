@@ -28,6 +28,7 @@
       font-size: 12px;
       z-index: 20;
       white-space: pre-wrap;
+      max-width: 90vw;
     }
     #startBtn {
       position: absolute;
@@ -121,15 +122,24 @@
             const tex = glBinding.getCameraImage(view.camera);
             if (!tex) return;
 
-            const internalFormat = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_INTERNAL_FORMAT);
-            const type = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_TYPE);
-            const format = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_FORMAT);
-            log("AR Texture Format:\n" +
-              "InternalFormat: " + internalFormat + "\n" +
-              "Type: " + type + "\n" +
-              "Format: " + format);
-
             processingLock.busy = true;
+
+            try {
+              const fb = gl.createFramebuffer();
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+              gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+              gl.bindTexture(gl.TEXTURE_2D, tex);
+
+              const internalFormat = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_INTERNAL_FORMAT);
+              const type = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_TYPE);
+              const format = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_FORMAT);
+              log("AR Texture Info:\n" +
+                  "InternalFormat: " + internalFormat + "\n" +
+                  "Type: " + type + "\n" +
+                  "Format: " + format);
+            } catch (err) {
+              log("Texture format read error: " + err.message);
+            }
 
             const logicalShape = [224, 224, 3];
             const tensor = tf.tensor({
