@@ -185,12 +185,10 @@
             const inferenceTime = performance.now() - inferenceStart;
             const mask = tf.sub(1, prediction);
             const preview = inputTensor.squeeze();
-            const previewForCanvas = preview.mul(255);
-
             const postStart = performance.now();
             await Promise.all([
               tf.browser.toPixels(mask, tempCanvas),
-              tf.browser.toPixels(previewForCanvas, inputView)
+              tf.browser.toPixels(preview, inputView)
             ]);
             const postTime = performance.now() - postStart;
 
@@ -199,7 +197,7 @@
             maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
             maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-            tf.dispose([inputTensor, prediction, mask, preview, previewForCanvas]);
+            tf.dispose([inputTensor, prediction, mask, preview]);
             processingLock.busy = false;
 
             const now = performance.now();
