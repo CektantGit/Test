@@ -141,11 +141,10 @@
         inputCtx.drawImage(source, 0, 0, 224, 224);
         return tf.tidy(() =>
           tf.browser
-            .fromPixels(source, 3)
+            .fromPixels(inputCanvas, 3)
             .resizeBilinear([224, 224])
-            .toFloat()
             .div(255)
-            .expandDims(0)
+            .expandDims()
         );
       } catch (e) {
         log('preprocess failed: ' + e.message);
@@ -155,15 +154,25 @@
 
     async function postprocess(maskTensor) {
       try {
-        await tf.browser.toPixels(
-          tf.tidy(() =>
-            maskTensor
-              .resizeBilinear([maskCanvas.height, maskCanvas.width])
-              .mul(255)
-              .toInt()
-          ),
-          maskCanvas
-        );
+        const maskData = maskTensor.dataSync();
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = 224;
+        offCanvas.height = 224;
+        const offCtx = offCanvas.getContext('2d');
+        const imgData = offCtx.createImageData(224, 224);
+        for (let y = 0; y < 224; y++) {
+          for (let x = 0; x < 224; x++) {
+            const value = maskData[y * 224 + x] * 255;
+            const idx = (y * 224 + x) * 4;
+            imgData.data[idx] = 255 - value;
+            imgData.data[idx + 1] = 255 - value;
+            imgData.data[idx + 2] = 255 - value;
+            imgData.data[idx + 3] = 255;
+          }
+        }
+        offCtx.putImageData(imgData, 0, 0);
+        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        maskCtx.drawImage(offCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
       } catch (e) {
         log('postprocess failed: ' + e.message);
         throw e;
