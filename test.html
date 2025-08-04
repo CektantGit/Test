@@ -46,8 +46,8 @@
       position: absolute;
       top: 60px;
       left: 10px;
-      width: 112px;
-      height: 112px;
+      width: 224px;
+      height: 224px;
       z-index: 25;
       border: 1px solid red;
     }
@@ -185,17 +185,22 @@
             const inferenceTime = performance.now() - inferenceStart;
             const mask = tf.sub(1, prediction);
             const preview = inputTensor.squeeze();
+
             const postStart = performance.now();
-            await Promise.all([
-              tf.browser.toPixels(mask, tempCanvas),
-              tf.browser.toPixels(preview, inputView)
-            ]);
-            const postTime = performance.now() - postStart;
+
+            await tf.browser.toPixels(
+              tf.tidy(() => mask.greater(0.5).toFloat().mul(255)),
+              tempCanvas
+            );
 
             maskCanvas.width = window.innerWidth;
             maskCanvas.height = window.innerHeight;
             maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
             maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+
+            await tf.browser.toPixels(preview, inputView);
+
+            const postTime = performance.now() - postStart;
 
             tf.dispose([inputTensor, prediction, mask, preview]);
             processingLock.busy = false;
