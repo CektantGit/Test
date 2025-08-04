@@ -53,8 +53,8 @@
   <script>
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
-    let model, gl, session, glBinding;
-    let maskCanvas, maskCtx, tempCanvas;
+      let model, gl, session, glBinding;
+      let maskCanvas, maskCtx;
     let processingLock, fpsHistory;
 
     function log(msg) {
@@ -169,21 +169,32 @@
             }
             const preprocessTime = performance.now() - preprocessStart;
 
-            const inferenceStart = performance.now();
-            const prediction = model.predict(inputTensor).squeeze();
-            await tf.nextFrame();
-            const inferenceTime = performance.now() - inferenceStart;
-            const mask = tf.sub(1, prediction);
-            const postStart = performance.now();
-            await tf.browser.toPixels(mask, tempCanvas);
-            const postTime = performance.now() - postStart;
+              const inferenceStart = performance.now();
+              const prediction = model.predict(inputTensor).squeeze();
+              await tf.nextFrame();
+              const inferenceTime = performance.now() - inferenceStart;
 
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+              const unetMaskArray = prediction.dataSync();
 
-            tf.dispose([inputTensor, prediction, mask]);
+              const postStart = performance.now();
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              const maskImageData = maskCtx.createImageData(224, 224);
+
+              for (let y = 0; y < 224; y++) {
+                for (let x = 0; x < 224; x++) {
+                  const value = unetMaskArray[y * 224 + x] * 255;
+                  const idx = (y * 224 + x) * 4;
+                  maskImageData.data[idx + 0] = 255 - value;
+                  maskImageData.data[idx + 1] = 255 - value;
+                  maskImageData.data[idx + 2] = 255 - value;
+                  maskImageData.data[idx + 3] = 255 - value;
+                }
+              }
+
+              maskCtx.putImageData(maskImageData, 0, 0);
+              const postTime = performance.now() - postStart;
+
+            tf.dispose([inputTensor, prediction]);
             processingLock.busy = false;
 
             const now = performance.now();
@@ -220,10 +231,8 @@
         return;
       }
       maskCtx = maskCanvas.getContext('2d');
-
-      tempCanvas = document.createElement('canvas');
-      tempCanvas.width = 224;
-      tempCanvas.height = 224;
+      maskCanvas.width = 224;
+      maskCanvas.height = 224;
 
       processingLock = { busy: false };
       fpsHistory = [];
