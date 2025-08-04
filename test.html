@@ -88,8 +88,12 @@
       try {
         await tf.setBackend('webgl');
         await tf.ready();
-        gl = tf.backend().gl;
-        if (gl && typeof gl.makeXRCompatible === 'function') {
+        const backend = tf.backend();
+        gl = backend?.getGPGPUContext?.().gl || backend?.gpgpu?.gl || backend?.gl;
+        if (!gl) {
+          throw new Error('Failed to obtain WebGL context');
+        }
+        if (typeof gl.makeXRCompatible === 'function') {
           try {
             if (gl.canvas && typeof gl.canvas.addEventListener === 'function') {
               await gl.makeXRCompatible();
