@@ -32,7 +32,7 @@
     }
     #glInfo {
       position: absolute;
-      bottom: 10px;
+      top: 10px;
       right: 10px;
       color: lime;
       background: rgba(0,0,0,0.6);
@@ -82,7 +82,6 @@
     }
 
     function logGLInfo(msg) {
-      console.log("[GL]", msg);
       document.getElementById('glInfo').textContent = msg;
     }
 
@@ -151,24 +150,17 @@
               const fb = gl.createFramebuffer();
               gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
               gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-              gl.bindTexture(gl.TEXTURE_2D, tex);
 
-              const internalFormat = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_INTERNAL_FORMAT);
-              const type = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_TYPE);
-              const format = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_FORMAT);
-
-              logGLInfo("AR Texture Info:\n" +
-                         "InternalFormat: " + internalFormat + "\n" +
-                         "Type: " + type + "\n" +
-                         "Format: " + format);
+              const attachment = gl.getFramebufferAttachmentParameter(
+                gl.FRAMEBUFFER,
+                gl.COLOR_ATTACHMENT0,
+                gl.FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE
+              );
+              logGLInfo("Framebuffer attachment type: " + attachment);
             } catch (err) {
               logGLInfo("GL param read failed: " + err.message);
             }
 
-            // HERE: If texture still invalid, print texture object
-            console.warn("[DEBUG] tex:", tex);
-
-            // This is placeholder; original path that leads to TF error goes here
             log("TF Error: The texture is invalid. (Simulated here for debug)");
             processingLock.busy = false;
           } catch (err) {
