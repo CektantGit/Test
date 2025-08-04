@@ -71,7 +71,7 @@
         varying vec2 v_uv;
         void main() {
           float m = texture2D(u_mask, v_uv).r;
-          gl_FragColor = vec4(vec3(1.0 - m), 1.0);
+          gl_FragColor = vec4(1.0, 0.0, 0.0, m);
         }
       `;
       const vs = gl.createShader(gl.VERTEX_SHADER);
@@ -89,6 +89,9 @@
       quadVBO = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     function drawMaskFromGLTexture(texture) {
@@ -122,24 +125,30 @@
 
     async function loadModel() {
       try {
-        await tf.setBackend('webgl');
-        await tf.ready();
-        const backend = tf.backend();
-        gl = backend?.getGPGPUContext?.().gl || backend?.gpgpu?.gl || backend?.gl;
-        if (!gl) {
-          throw new Error('Failed to obtain WebGL context');
-        }
+        const outputCanvas = document.createElement('canvas');
+        outputCanvas.width = window.innerWidth;
+        outputCanvas.height = window.innerHeight;
+        outputCanvas.style.position = 'fixed';
+        outputCanvas.style.top = '0';
+        outputCanvas.style.left = '0';
+        outputCanvas.style.width = '100vw';
+        outputCanvas.style.height = '100vh';
+        outputCanvas.style.zIndex = '10';
+        outputCanvas.style.pointerEvents = 'none';
+        outputCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
+        outputCanvas.id = 'maskCanvas';
+        document.body.appendChild(outputCanvas);
+
+        gl = outputCanvas.getContext('webgl');
         if (typeof gl.makeXRCompatible === 'function') {
           try {
-            if (gl.canvas && typeof gl.canvas.addEventListener === 'function') {
-              await gl.makeXRCompatible();
-            } else {
-              log('Skipping XR compatibility: canvas lacks addEventListener');
-            }
+            await gl.makeXRCompatible();
           } catch (err) {
             log('XR compatibility error: ' + err.message);
           }
         }
+        await tf.setBackend('webgl', { gl });
+        await tf.ready();
         log('Using WebGL backend');
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded");
@@ -155,22 +164,6 @@
 
         await loadModel();
 
-        // Use the backend canvas as the mask overlay.
-        const renderCanvas = gl.canvas;
-        if (renderCanvas instanceof HTMLCanvasElement) {
-          renderCanvas.width = window.innerWidth;
-          renderCanvas.height = window.innerHeight;
-          renderCanvas.style.position = 'fixed';
-          renderCanvas.style.top = '0';
-          renderCanvas.style.left = '0';
-          renderCanvas.style.width = '100vw';
-          renderCanvas.style.height = '100vh';
-          renderCanvas.style.zIndex = '10';
-          renderCanvas.style.pointerEvents = 'none';
-          renderCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
-          renderCanvas.id = 'maskCanvas';
-          document.body.appendChild(renderCanvas);
-        }
         initMaskPipeline(gl);
 
         session = await navigator.xr.requestSession('immersive-ar', {
@@ -227,15 +220,17 @@
               const inferenceTime = performance.now() - inferenceStart;
               const postStart = performance.now();
 
-              const texData = tf.backend().texData.get(prediction.dataId);
-              const maskTex = Array.isArray(texData?.texture)
-                ? texData.texture[0]
-                : texData?.texture;
-              if (maskTex instanceof WebGLTexture) {
-                drawMaskFromGLTexture(maskTex);
-              } else {
-                logGLInfo('Prediction texture missing or invalid');
-              }
+                const texData = tf.backend().texData.get(prediction.dataId);
+                const maskTex = Array.isArray(texData?.texture)
+                  ? texData.texture[0]
+                  : texData?.texture;
+                if (!maskTex) {
+                  logGLInfo('Texture is null or not available (still on CPU?)');
+                } else if (maskTex instanceof WebGLTexture) {
+                  drawMaskFromGLTexture(maskTex);
+                } else {
+                  logGLInfo('Prediction texture missing or invalid');
+                }
               const postTime = performance.now() - postStart;
 
             tf.dispose([inputTensor, prediction]);
