@@ -99,8 +99,8 @@
       gl.getExtension('OES_EGL_image_external');
     }
 
-    function drawCameraFrame(frame) {
-      const cameraTex = glBinding.getCameraImage(frame);
+    function drawCameraFrame(view) {
+      const cameraTex = glBinding.getCameraImage(view.camera);
       if (!cameraTex) return false;
       gl.useProgram(cameraProgram);
       gl.activeTexture(gl.TEXTURE0);
@@ -382,9 +382,10 @@
           session.requestAnimationFrame(onFrame);
           return;
         }
+        const view = pose.views[0];
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
-        if (!drawCameraFrame(frame)) {
+        if (!drawCameraFrame(view)) {
           session.requestAnimationFrame(onFrame);
           return;
         }
