@@ -227,6 +227,8 @@
         renderer3D = new THREE.WebGLRenderer({ context: gl, alpha: true });
         renderer3D.autoClear = false;
         scene3D = new THREE.Scene();
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+        scene3D.add(hemiLight);
         camera3D = new THREE.PerspectiveCamera();
         camera3D.matrixAutoUpdate = false;
         applyMask = new MaskStep(renderer3D);
@@ -244,7 +246,8 @@
         try {
           const gltf = await gltfLoader.loadAsync(modelUrl);
           gltfModel = gltf.scene;
-          gltfModel.position.set(0, -1, 0);
+          gltfModel.position.set(0, 0, -1);
+          gltfModel.scale.set(0.5, 0.5, 0.5);
           scene3D.add(gltfModel);
         } catch (e) {
           log('Model load error: ' + e.message);
