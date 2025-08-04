@@ -140,9 +140,7 @@
 
         async function onFrame(time, frame) {
           session.requestAnimationFrame(onFrame);
-          
           if (processingLock.busy) return;
-          
 
           try {
             const pose = frame.getViewerPose(referenceSpace);
@@ -197,10 +195,7 @@
               const postTime = performance.now() - postStart;
 
             tf.dispose([inputTensor, prediction]);
-
             processingLock.busy = false;
-            session.requestAnimationFrame(onFrame);
-            
 
             const now = performance.now();
             const frameTime = now - lastFrameTime;
@@ -213,13 +208,13 @@
               `Inference: ${inferenceTime.toFixed(1)} ms\n` +
               `Postprocess: ${postTime.toFixed(1)} ms\n` +
               `FPS: ${avgFps.toFixed(1)}`;
-            processingLock.busy = false;
           } catch (err) {
             log("Frame error: " + err.message);
-
+            processingLock.busy = false;
           }
         }
 
+        session.requestAnimationFrame(onFrame);
         document.getElementById('startBtn').style.display = 'none';
       } catch (e) {
         log('Unexpected error: ' + e.message);
