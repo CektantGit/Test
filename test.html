@@ -78,11 +78,14 @@
 
     function log(msg) {
       console.error(msg);
-      document.getElementById('info').textContent = "Status:\n" + msg;
+      const infoEl = document.getElementById('info');
+      if (infoEl.textContent.includes(msg)) return;
+      infoEl.textContent = "Status:\n" + msg;
     }
 
     function logGLInfo(msg) {
-      document.getElementById('glInfo').textContent = msg;
+      const el = document.getElementById('glInfo');
+      el.textContent = msg;
     }
 
     async function loadModel() {
@@ -152,6 +155,8 @@
             const w = view.camera.width;
             const h = view.camera.height;
 
+            logGLInfo(`AR Image: ${w}x${h}\nTex: ${tex}`);
+
             const fb = gl.createFramebuffer();
             gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
@@ -211,7 +216,10 @@
       }
     }
 
-    document.getElementById('startBtn').addEventListener('click', startAR);
+    window.addEventListener('load', () => {
+      const btn = document.getElementById('startBtn');
+      if (btn) btn.addEventListener('click', startAR);
+    });
   </script>
 </body>
 </html>
