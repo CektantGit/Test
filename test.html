@@ -181,7 +181,7 @@
 
             const inferenceStart = performance.now();
             const prediction = model.predict(inputTensor).squeeze();
-            await prediction.data();
+            await tf.nextFrame();
             const inferenceTime = performance.now() - inferenceStart;
             const mask = tf.sub(1, prediction);
             const preview = inputTensor.squeeze();
