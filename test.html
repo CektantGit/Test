@@ -221,10 +221,10 @@
       }
     }
 
-    async function preprocess(cameraBitmap) {
+    async function preprocess(source) {
       try {
         queue.copyExternalImageToTexture(
-          { source: cameraBitmap, flipY: true },
+          { source, flipY: true },
           { texture: cameraTexture },
           [224, 224]
         );
@@ -431,17 +431,8 @@
           return;
         }
 
-        let tex;
-        try {
-          tex = await createImageBitmap(gl.canvas);
-        } catch (_) {
-          session.requestAnimationFrame(onFrame);
-          return;
-        }
-
         const tPreStart = performance.now();
-        const input = await preprocess(tex);
-        tex.close();
+        const input = await preprocess(gl.canvas);
         const meanVal = (await input.mean().data())[0];
         log('input mean ' + meanVal.toFixed(3));
         const tPreEnd = performance.now();
