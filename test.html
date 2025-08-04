@@ -49,13 +49,19 @@
   <div id="glInfo"></div>
   <script type="module">
     import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
+    const modelUrl = 'https://vizbl-1.s3.eu-central-1.amazonaws.com/native/b617533f-d965-4782-8d22-c0574541b809.glb?version=1';
+    const gltfLoader = new GLTFLoader();
+    let gltfModel;
+    const modelPromise = gltfLoader.loadAsync(modelUrl).then(g => g.scene).catch(e => { log('Model load error: ' + e.message); });
+
       let model, gl, session, glBinding;
     let processingLock, fpsHistory;
-    let applyMask;
+    let applyMask, renderer3D, scene3D, camera3D;
 
     // ---- GPU utilities ----
     class GlTextureImpl {
@@ -82,9 +88,8 @@
     }
 
     class MaskStep {
-      constructor(gl) {
-        this.renderer = new THREE.WebGLRenderer({ context: gl, alpha: true });
-        this.renderer.autoClear = false;
+      constructor(renderer) {
+        this.renderer = renderer;
         this.scene = new THREE.Scene();
         this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
@@ -96,7 +101,7 @@
         const material = new THREE.ShaderMaterial({
           uniforms: this.uniforms,
           vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position, 1.0); }`,
-          fragmentShader: `uniform sampler2D frame; uniform sampler2D mask; varying vec2 vUv; void main(){ vec2 coord = vec2(1.0 - vUv.x, vUv.y); vec4 src = texture2D(frame, coord); float prob = texture2D(mask, coord).r; vec4 purple = vec4(0.365, 0.247, 0.827, 1.0); gl_FragColor = mix(src, purple, step(0.5, prob)); }`,
+          fragmentShader: `\n            precision mediump float;\n            uniform sampler2D frame;\n            uniform sampler2D mask;\n            varying vec2 vUv;\n            void main(){\n              vec2 coord = vec2(1.0 - vUv.x, vUv.y);\n              vec4 src = texture2D(frame, coord);\n              float prob = texture2D(mask, coord).r;\n              float m = step(0.5, prob);\n              vec4 purple = vec4(0.365, 0.247, 0.827, 1.0);\n              gl_FragColor = vec4(mix(src.rgb, purple.rgb, m), 1.0);\n            }`,
           depthWrite: false,
           depthTest: false,
           transparent: true
@@ -123,6 +128,7 @@
         this.uniforms.mask.value.needsUpdate = false;
 
         this.composer.render();
+        this.renderer.setRenderTarget(null);
 
         const gl = this.renderer.getContext();
         const fb = props.get(this.renderTarget).__webglFramebuffer;
@@ -196,7 +202,21 @@
           }
         }
         log('Using WebGL backend');
-        applyMask = new MaskStep(gl);
+        renderer3D = new THREE.WebGLRenderer({ context: gl, alpha: true });
+        renderer3D.autoClear = false;
+        scene3D = new THREE.Scene();
+        camera3D = new THREE.PerspectiveCamera();
+        camera3D.matrixAutoUpdate = false;
+        applyMask = new MaskStep(renderer3D);
+
+        modelPromise.then(scene => {
+          if (scene) {
+            gltfModel = scene;
+            gltfModel.position.set(0, -1, 0);
+            scene3D.add(gltfModel);
+          }
+        });
+
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded");
       } catch (e) {
@@ -279,6 +299,17 @@
               gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
               gl.bindFramebuffer(gl.READ_FRAMEBUFFER, result.framebuffer_);
               gl.blitFramebuffer(0, 0, texWidth, texHeight, 0, texHeight, texWidth, 0, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+              gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+
+              renderer3D.state.reset();
+              renderer3D.setRenderTarget(null);
+              const viewport = session.renderState.baseLayer.getViewport(view);
+              renderer3D.setViewport(viewport.x, viewport.y, viewport.width, viewport.height);
+              camera3D.matrix.fromArray(view.transform.matrix);
+              camera3D.projectionMatrix.fromArray(view.projectionMatrix);
+              camera3D.matrixWorldNeedsUpdate = true;
+              renderer3D.render(scene3D, camera3D);
+
               const postTime = performance.now() - postStart;
 
             maskData.tensorRef.dispose();
