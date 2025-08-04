@@ -14,7 +14,6 @@
     canvas { display: block; }
     .overlay { position: absolute; bottom: 10px; right: 10; z-index: 13; }
     .overlay2 {  display: block;  position: absolute;  top: 0;  left: 0;  width: 100%;  height: 100%;  z-index: 10;}
-    #maskCanvas { width: 100%; height: 100%; }
     .button { display: block; margin: 5px 0; padding: 10px;  z-index: 12; background: rgba(0, 0, 0, 0.5); color: white; border: none; border-radius: 5px; cursor: pointer; }
     .info { position: absolute; bottom: 35px; right: 50px; z-index: 12; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 12; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
@@ -30,7 +29,7 @@
 </div>
 
 <div class="overlay2">
-  <canvas id="maskCanvas"></canvas>
+  <img id="maskImage"/>
 </div>
 
   
@@ -192,16 +191,6 @@ const vertexSource = `
   }
 `;
 
-const maskFragmentSource = `
-  precision mediump float;
-  varying vec2 vTexCoord;
-  uniform sampler2D uMask;
-  void main(void) {
-    float m = texture2D(uMask, vTexCoord).r;
-    gl_FragColor = vec4(0.0, 1.0, 0.0, m);
-  }
-`;
-
 function getShader(gl, source, type) {
   const shader = gl.createShader(type === 'fragment' ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER);
   gl.shaderSource(shader, source);
@@ -255,56 +244,6 @@ function initWebGLResources(gl) {
   }
 
   return { program, copyTexture, framebuffer };
-}
-
-function renderMask(maskArray) {
-  const canvas = document.getElementById('maskCanvas');
-  const gl = canvas.getContext('webgl');
-  canvas.width = 224;
-  canvas.height = 224;
-
-  const program = getProgram(gl, vertexSource, maskFragmentSource);
-  gl.useProgram(program);
-
-  const vertices = new Float32Array([
-    -1.0, -1.0, 0.0, 0.0,
-     1.0, -1.0, 1.0, 0.0,
-    -1.0,  1.0, 0.0, 1.0,
-     1.0,  1.0, 1.0, 1.0
-  ]);
-
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-  const position = gl.getAttribLocation(program, 'aVertexPosition');
-  const texCoord = gl.getAttribLocation(program, 'aTextureCoord');
-  gl.enableVertexAttribArray(position);
-  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 16, 0);
-  gl.enableVertexAttribArray(texCoord);
-  gl.vertexAttribPointer(texCoord, 2, gl.FLOAT, false, 16, 8);
-
-  const maskData = new Uint8Array(maskArray.length);
-  for (let i = 0; i < maskArray.length; i++) {
-    maskData[i] = maskArray[i] * 255;
-  }
-
-  const maskTexture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, maskTexture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 224, 224, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, maskData);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, maskTexture);
-  gl.uniform1i(gl.getUniformLocation(program, 'uMask'), 0);
-
-  gl.viewport(0, 0, 224, 224);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 async function captureImage(gl, glBinding, dcamera, resources) {
@@ -390,11 +329,29 @@ async function captureImage(gl, glBinding, dcamera, resources) {
     console.log("Model predictions:", predictions);
     document.getElementById('info').innerText += "Start convert predict";
     
-    // Process and display predictions using shader
+    // Process and display predictions
     const unetMask = predictions;
     const unetMaskArray = unetMask.dataSync();
     document.getElementById('info').innerText += "datasync";
-    renderMask(unetMaskArray);
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = 224;
+    maskCanvas.height = 224;
+    const maskCtx = maskCanvas.getContext('2d');
+    const maskImageData = maskCtx.createImageData(224, 224);
+
+    for (let i = 0; i < 224 * 224; i++) {
+      const value = unetMaskArray[i] * 255;
+      maskImageData.data[i * 4] = value; // R
+      maskImageData.data[i * 4 + 1] = value; // G
+      maskImageData.data[i * 4 + 2] = value; // B
+      maskImageData.data[i * 4 + 3] = 255; // A
+    }
+
+    maskCtx.putImageData(maskImageData, 0, 0);
+
+    const maskImageElement = document.getElementById('maskImage');
+    maskImageElement.src = maskCanvas.toDataURL('image/png');
+
     document.querySelector('.overlay').style.display = 'block';
 
   } catch (error) {
