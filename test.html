@@ -59,7 +59,7 @@
   </style>
 </head>
 <body>
-  <button id="startBtn">Start AR Segmentation</button>
+  <button id="startBtn" onclick="startAR()">Start AR Segmentation</button>
   <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
   <div id="glInfo"></div>
@@ -214,15 +214,6 @@
         log('Unexpected error: ' + e.message);
       }
     }
-
-    window.addEventListener('load', () => {
-      const btn = document.getElementById('startBtn');
-      if (btn && typeof btn.addEventListener === 'function') {
-        btn.addEventListener('click', startAR);
-      } else {
-        log('startBtn is not a valid element or lacks addEventListener');
-      }
-    });
   </script>
 </body>
 </html>
