@@ -201,7 +201,7 @@
         const data = await maskTensor.data();
         const upload = device.createBuffer({
           size: data.byteLength,
-          usage: GPUBufferUsage.COPY_SRC,
+          usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE,
           mappedAtCreation: true
         });
         new Float32Array(upload.getMappedRange()).set(data);
