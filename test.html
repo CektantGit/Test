@@ -141,7 +141,6 @@
         async function onFrame(time, frame) {
           session.requestAnimationFrame(onFrame);
           if (processingLock.busy) return;
-          const preprocessStart = performance.now();
 
           try {
             const pose = frame.getViewerPose(referenceSpace);
@@ -159,7 +158,7 @@
 
             processingLock.busy = true;
 
-            
+            const preprocessStart = performance.now();
             let inputTensor;
             try {
               inputTensor = preprocessTexture(tex, texWidth, texHeight);
@@ -174,11 +173,10 @@
               const prediction = model.predict(inputTensor).squeeze();
               await tf.nextFrame();
               const inferenceTime = performance.now() - inferenceStart;
-              const postStart = performance.now();
 
               const unetMaskArray = prediction.dataSync();
 
-              
+              const postStart = performance.now();
               maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
               const maskImageData = maskCtx.createImageData(224, 224);
 
@@ -197,7 +195,7 @@
               const postTime = performance.now() - postStart;
 
             tf.dispose([inputTensor, prediction]);
-            
+            processingLock.busy = false;
 
             const now = performance.now();
             const frameTime = now - lastFrameTime;
@@ -215,7 +213,7 @@
             processingLock.busy = false;
           }
         }
-        processingLock.busy = false;
+
         session.requestAnimationFrame(onFrame);
         document.getElementById('startBtn').style.display = 'none';
       } catch (e) {
