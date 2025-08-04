@@ -198,7 +198,12 @@
 
     async function postprocess(maskTensor) {
       try {
-        const data = await maskTensor.data();
+        let tensor = maskTensor;
+        if (maskTensor.dtype !== 'float32') {
+          tensor = maskTensor.toFloat();
+        }
+        const data = await tensor.data();
+        if (tensor !== maskTensor) tensor.dispose();
         const upload = device.createBuffer({
           size: data.byteLength,
           usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE,
