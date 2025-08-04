@@ -150,7 +150,7 @@
 
         let lastFrameTime = performance.now();
 
-        function onFrame(time, frame) {
+        async function onFrame(time, frame) {
           session.requestAnimationFrame(onFrame);
           if (processingLock.busy) return;
 
@@ -170,6 +170,7 @@
 
             processingLock.busy = true;
 
+            const preprocessStart = performance.now();
             let inputTensor;
             try {
               inputTensor = preprocessTexture(tex, texWidth, texHeight);
@@ -178,32 +179,42 @@
               processingLock.busy = false;
               return;
             }
+            const preprocessTime = performance.now() - preprocessStart;
 
+            const inferenceStart = performance.now();
             const prediction = model.predict(inputTensor).squeeze();
+            await prediction.data();
+            const inferenceTime = performance.now() - inferenceStart;
             const mask = tf.sub(1, prediction);
             const preview = inputTensor.squeeze();
             const previewForCanvas = preview.mul(255);
 
-            Promise.all([
+            const postStart = performance.now();
+            await Promise.all([
               tf.browser.toPixels(mask, tempCanvas),
               tf.browser.toPixels(previewForCanvas, inputView)
-            ]).then(() => {
-              maskCanvas.width = window.innerWidth;
-              maskCanvas.height = window.innerHeight;
-              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+            ]);
+            const postTime = performance.now() - postStart;
 
-              tf.dispose([inputTensor, prediction, mask, preview, previewForCanvas]);
-              processingLock.busy = false;
+            maskCanvas.width = window.innerWidth;
+            maskCanvas.height = window.innerHeight;
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+            maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-              const now = performance.now();
-              const frameTime = now - lastFrameTime;
-              lastFrameTime = now;
-              fpsHistory.push(1000 / frameTime);
-              if (fpsHistory.length > 30) fpsHistory.shift();
-              const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-              log(`FPS: ${avgFps.toFixed(1)}`);
-            });
+            tf.dispose([inputTensor, prediction, mask, preview, previewForCanvas]);
+            processingLock.busy = false;
+
+            const now = performance.now();
+            const frameTime = now - lastFrameTime;
+            lastFrameTime = now;
+            fpsHistory.push(1000 / frameTime);
+            if (fpsHistory.length > 30) fpsHistory.shift();
+            const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+            document.getElementById('info').textContent =
+              `Preprocess: ${preprocessTime.toFixed(1)} ms\n` +
+              `Inference: ${inferenceTime.toFixed(1)} ms\n` +
+              `Postprocess: ${postTime.toFixed(1)} ms\n` +
+              `FPS: ${avgFps.toFixed(1)}`;
           } catch (err) {
             log("Frame error: " + err.message);
             processingLock.busy = false;
