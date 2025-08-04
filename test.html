@@ -3,11 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AR Segmentation - Preprocess & Inference Optimized</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu"></script>
+  <title>AR Fast Inference (WebGL)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0"></script>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; overflow: hidden; background: black; }
     #maskCanvas {
       position: fixed;
       top: 0; left: 0;
@@ -21,7 +20,7 @@
       position: absolute;
       bottom: 10px;
       left: 10px;
-      color: white;
+      color: lime;
       background: rgba(0,0,0,0.5);
       padding: 6px;
       font-family: monospace;
@@ -44,8 +43,8 @@
   </style>
 </head>
 <body>
-  <button id="startBtn">Start AR Segmentation</button>
-  <canvas id="maskCanvas"></canvas>
+  <button id="startBtn">Start AR</button>
+  <canvas id="maskCanvas" width="224" height="224"></canvas>
   <div id="info">Status: idle</div>
 
   <script>
@@ -59,31 +58,14 @@
     let fpsHistory = [];
     let lastFrameTime = performance.now();
 
-    function log(msg) {
-      document.getElementById('info').textContent = "Status:\n" + msg;
-    }
-
     async function loadModel() {
-      try {
-        await tf.setBackend('webgpu');
-        await tf.ready();
-        log('Using WebGPU backend\n');
-      } catch (e) {
-        log('WebGPU init failed, falling back to WebGL...');
-        await tf.setBackend('webgl');
-        await tf.ready();
-        log('Using WebGL backend\n');
-      }
-      try {
-        model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded\n");
-      } catch (e) {
-        log('Model load failed: ' + e.message);
-      }
+      await tf.setBackend('webgl');
+      await tf.ready();
+      console.log("Backend:", tf.getBackend());
+      model = await tf.loadLayersModel('jsModel/model.json');
     }
 
     async function startAR() {
-      log("Starting AR...");
       await loadModel();
 
       const canvas = document.createElement('canvas');
@@ -96,7 +78,7 @@
           domOverlay: { root: document.body }
         });
       } catch (e) {
-        log('Failed to start AR session: ' + e.message);
+        log('Failed to start AR: ' + e.message);
         return;
       }
 
@@ -112,6 +94,10 @@
       session.requestAnimationFrame(onFrame);
     }
 
+    function log(msg) {
+      document.getElementById('info').textContent = "Status:\n" + msg;
+    }
+
     function onFrame(time, frame) {
       if (processingLock.busy) return;
 
@@ -123,8 +109,8 @@
       if (!tex) return requestNextFrame();
 
       const frameData = { view, tex };
-
       processingLock.busy = true;
+
       processFrame(frameData).then(() => {
         processingLock.busy = false;
         requestNextFrame();
@@ -141,61 +127,51 @@
 
       const pixels = new Uint8Array(w * h * 4);
       gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-      const imageData = new ImageData(new Uint8ClampedArray(pixels), w, h);
+      const imageData = new ImageData(pixels, w, h);
       const bitmap = await createImageBitmap(imageData);
 
-      // === Preprocess ===
-      const tPreStart = performance.now();
+      // === Preprocess (as in video) ===
+      const t0 = performance.now();
       cameraCtx.drawImage(bitmap, 0, 0, 224, 224);
       const imageTensor = tf.browser.fromPixels(cameraCanvas, 3)
                                    .resizeBilinear([224, 224])
-                                   .div(255.0)
+                                   .div(255)
                                    .expandDims();
-      const tPreEnd = performance.now();
+      const t1 = performance.now();
 
       // === Inference ===
-      const tInferStart = performance.now();
-      const predictions = await model.predict(imageTensor);
-      const unetMaskArray = predictions.dataSync();
-      const tInferEnd = performance.now();
+      const prediction = model.predict(imageTensor);
+      const unetMaskArray = prediction.dataSync(); // FAST
+      const t2 = performance.now();
 
-      tf.dispose([imageTensor, predictions]);
+      tf.dispose([imageTensor, prediction]);
 
-      // === Postprocess (draw directly from array) ===
-      const imageDataMask = new ImageData(224, 224);
+      // === Postprocess (direct putImageData)
+      const maskImage = new ImageData(224, 224);
       for (let i = 0; i < 224 * 224; i++) {
         const v = 255 - (unetMaskArray[i] * 255) | 0;
         const j = i * 4;
-        imageDataMask.data[j + 0] = v;
-        imageDataMask.data[j + 1] = v;
-        imageDataMask.data[j + 2] = v;
-        imageDataMask.data[j + 3] = 255;
+        maskImage.data[j] = v;
+        maskImage.data[j + 1] = v;
+        maskImage.data[j + 2] = v;
+        maskImage.data[j + 3] = 255;
       }
 
-      const bitmapMask = await createImageBitmap(imageDataMask);
-      maskCanvas.width = window.innerWidth;
-      maskCanvas.height = window.innerHeight;
       maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-      maskCtx.drawImage(bitmapMask, 0, 0, maskCanvas.width, maskCanvas.height);
+      maskCtx.putImageData(maskImage, 0, 0);
 
-      // === FPS info ===
-      const now = performance.now();
-      const frameTime = now - lastFrameTime;
-      lastFrameTime = now;
-      fpsHistory.push(1000 / frameTime);
+      const t3 = performance.now();
+      const fps = 1000 / (t3 - lastFrameTime);
+      lastFrameTime = t3;
+
+      fpsHistory.push(fps);
       if (fpsHistory.length > 30) fpsHistory.shift();
       const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-      log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tInferEnd - tInferStart).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+      log(`Pre: ${(t1 - t0).toFixed(1)}ms\nInfer: ${(t2 - t1).toFixed(1)}ms\nPost: ${(t3 - t2).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
     }
 
-    document.getElementById('startBtn').addEventListener('click', () => {
-      try {
-        startAR();
-      } catch (e) {
-        log('Unexpected error: ' + e.message);
-      }
-    });
+    document.getElementById('startBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
