@@ -59,7 +59,7 @@
   </style>
 </head>
 <body>
-  <button id="startBtn" onclick="startAR()">Start AR Segmentation</button>
+  <button id="startBtn">Start AR Segmentation</button>
   <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
   <div id="glInfo"></div>
@@ -78,22 +78,18 @@
 
     function log(msg) {
       console.error(msg);
-      const infoEl = document.getElementById('info');
-      infoEl.textContent = "Status:\n" + msg;
+      document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
     function logGLInfo(msg) {
-      const el = document.getElementById('glInfo');
-      el.textContent = msg;
+      document.getElementById('glInfo').textContent = msg;
     }
 
-    async function loadModel(glContext) {
+    async function loadModel() {
       try {
-        const customBackend = new tf.MathBackendWebGL(glContext);
-        tf.registerBackend('custom-webgl', () => customBackend);
-        await tf.setBackend('custom-webgl');
+        await tf.setBackend('webgl');
         await tf.ready();
-        log('Using custom WebGL backend');
+        log('Using WebGL backend');
       } catch (e) {
         log('Backend init failed: ' + e.message);
         throw e;
@@ -111,14 +107,13 @@
     async function startAR() {
       try {
         log("Starting AR...");
+        await loadModel();
 
         const canvas = document.createElement('canvas');
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         document.body.appendChild(canvas);
         gl = canvas.getContext('webgl', { xrCompatible: true });
-
-        await loadModel(gl);
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -148,60 +143,33 @@
 
             processingLock.busy = true;
 
-            const w = view.camera.width || 224;
-            const h = view.camera.height || 224;
-            logGLInfo(`AR Image: ${w}x${h}\nTex: ${tex}`);
+            const inputTensor = tf.tensor({
+              texture: tex,
+              width: 224,
+              height: 224,
+              channels: 'RGBA'
+            }, [224, 224, 4], 'float32').div(255).expandDims();
 
-            const fb = gl.createFramebuffer();
-            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            const prediction = model.predict(inputTensor).squeeze();
+            prediction.data().then(() => {
+              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+                maskCanvas.width = window.innerWidth;
+                maskCanvas.height = window.innerHeight;
+                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-            try {
-              const tensor = tf.tensor({
-                texture: tex,
-                height: h,
-                width: w,
-                channels: 'RGB'
-              }, [h, w, 3], 'float32');
-
-              const tPreStart = performance.now();
-              const input = tensor.resizeBilinear([224, 224]).div(255.0).expandDims();
-              const tPreEnd = performance.now();
-
-              const prediction = model.predict(input).squeeze();
-              prediction.data().then(() => {
-                const tPredictEnd = performance.now();
-                tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-                  const tPostEnd = performance.now();
-
-                  maskCanvas.width = window.innerWidth;
-                  maskCanvas.height = window.innerHeight;
-                  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                  maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-
-                  tf.dispose([input, prediction, tensor]);
-                  processingLock.busy = false;
-
-                  const now = performance.now();
-                  const frameTime = now - lastFrameTime;
-                  lastFrameTime = now;
-                  fpsHistory.push(1000 / frameTime);
-                  if (fpsHistory.length > 30) fpsHistory.shift();
-                  const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-                  log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
-                }).catch(err => {
-                  log("Postprocess error: " + err.message);
-                  processingLock.busy = false;
-                });
-              }).catch(err => {
-                log("Prediction error: " + err.message);
+                tf.dispose([inputTensor, prediction]);
                 processingLock.busy = false;
+
+                const now = performance.now();
+                const frameTime = now - lastFrameTime;
+                lastFrameTime = now;
+                fpsHistory.push(1000 / frameTime);
+                if (fpsHistory.length > 30) fpsHistory.shift();
+                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+                log(`FPS: ${avgFps.toFixed(1)}`);
               });
-            } catch (tensorErr) {
-              log("Tensor creation failed: " + tensorErr.message);
-              processingLock.busy = false;
-            }
+            });
           } catch (err) {
             log("Frame error: " + err.message);
             processingLock.busy = false;
@@ -214,6 +182,8 @@
         log('Unexpected error: ' + e.message);
       }
     }
+
+    document.getElementById('startBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
