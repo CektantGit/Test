@@ -180,6 +180,11 @@
 
         session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
         const referenceSpace = await session.requestReferenceSpace('local');
+
+        if (session.supportedFrameRates?.includes(30)) {
+          await session.updateTargetFrameRate(30);
+        }
+                
         glBinding = new XRWebGLBinding(session, gl);
 
         let lastFrameTime = performance.now();
