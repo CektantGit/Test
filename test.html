@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Real-time Segmentation (WebGPU Optimized)</title>
+  <title>AR Real-time Segmentation (WebGLTexture Direct Input)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <style>
@@ -69,10 +69,6 @@
     let gl, session, glBinding;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = 224;
-    tempCanvas.height = 224;
-    const tempCtx = tempCanvas.getContext('2d');
     const processingLock = { busy: false };
     let fpsHistory = [];
 
@@ -85,11 +81,14 @@
       document.getElementById('glInfo').textContent = msg;
     }
 
-    async function loadModel() {
+    async function loadModel(canvas) {
       try {
-        await tf.setBackend('webgl');
+        gl = canvas.getContext('webgl', { xrCompatible: true });
+        const backend = new tf.MathBackendWebGL(gl);
+        tf.registerBackend('custom-webgl', () => backend);
+        await tf.setBackend('custom-webgl');
         await tf.ready();
-        log('Using WebGL backend');
+        log('Using custom WebGL backend');
       } catch (e) {
         log('Backend init failed: ' + e.message);
         throw e;
@@ -107,13 +106,13 @@
     async function startAR() {
       try {
         log("Starting AR...");
-        await loadModel();
 
         const canvas = document.createElement('canvas');
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         document.body.appendChild(canvas);
-        gl = canvas.getContext('webgl', { xrCompatible: true });
+
+        await loadModel(canvas);
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -143,21 +142,17 @@
 
             processingLock.busy = true;
 
-            const inputTensor = tf.tensor({
+            const webglData = {
               texture: tex,
-              width: 224,
               height: 224,
+              width: 224,
               channels: 'RGBA'
-            }, [224, 224, 4], 'float32').div(255).expandDims();
+            };
 
+            const inputTensor = tf.tensor(webglData, [224, 224, 4], 'float32').div(255).expandDims();
             const prediction = model.predict(inputTensor).squeeze();
             prediction.data().then(() => {
-              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-                maskCanvas.width = window.innerWidth;
-                maskCanvas.height = window.innerHeight;
-                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-
+              tf.browser.toPixels(tf.sub(1, prediction), maskCanvas).then(() => {
                 tf.dispose([inputTensor, prediction]);
                 processingLock.busy = false;
 
