@@ -74,9 +74,9 @@ void main() {
   float probability = texture(mask, coord).r;
   vec4 purple = vec4(0.365, 0.247, 0.827, 1.0);
   if (probability > 0.5) {
-    out_color = mix(src_color, purple, 0.5);
+    out_color = vec4(255.0, 255.0, 255.0, 255.0);
   } else {
-    out_color = src_color;
+    out_color = vec4(255.0, 255.0, 255.0, 255.0);
   }
   
 }`;
