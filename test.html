@@ -228,6 +228,7 @@
           { texture: cameraTexture },
           [224, 224]
         );
+        await queue.onSubmittedWorkDone();
         const bind = device.createBindGroup({
           layout: preprocessPipeline.getBindGroupLayout(0),
           entries: [
