@@ -45,7 +45,7 @@
     // fully ready to avoid accessing elements before they exist.
       let model, gl, session, glBinding;
     let processingLock, fpsHistory;
-    let shaderProgram, quadVBO, maskTexLoc, posLoc;
+    let maskCanvas, maskCtx, maskTmpCanvas;
 
     function log(msg) {
       console.error(msg);
@@ -56,55 +56,25 @@
       document.getElementById('glInfo').textContent = msg;
     }
 
-    function initMaskPipeline(gl) {
-      const vertSrc = `
-        attribute vec2 pos;
-        varying vec2 v_uv;
-        void main() {
-          v_uv = pos * 0.5 + 0.5;
-          gl_Position = vec4(pos, 0.0, 1.0);
-        }
-      `;
-      const fragSrc = `
-        precision mediump float;
-        uniform sampler2D u_mask;
-        varying vec2 v_uv;
-        void main() {
-          float m = texture2D(u_mask, v_uv).r;
-          gl_FragColor = vec4(vec3(1.0 - m), 1.0);
-        }
-      `;
-      const vs = gl.createShader(gl.VERTEX_SHADER);
-      gl.shaderSource(vs, vertSrc);
-      gl.compileShader(vs);
-      const fs = gl.createShader(gl.FRAGMENT_SHADER);
-      gl.shaderSource(fs, fragSrc);
-      gl.compileShader(fs);
-      shaderProgram = gl.createProgram();
-      gl.attachShader(shaderProgram, vs);
-      gl.attachShader(shaderProgram, fs);
-      gl.linkProgram(shaderProgram);
-      posLoc = gl.getAttribLocation(shaderProgram, 'pos');
-      maskTexLoc = gl.getUniformLocation(shaderProgram, 'u_mask');
-      quadVBO = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-      gl.clearColor(0, 0, 0, 0);
-    }
-
-    function drawMaskFromGLTexture(texture) {
-      if (!shaderProgram) return;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.useProgram(shaderProgram);
-      gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
-      gl.enableVertexAttribArray(posLoc);
-      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(maskTexLoc, 0);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    function ensureMaskCanvas() {
+      if (maskCanvas) return;
+      maskCanvas = document.createElement('canvas');
+      maskCanvas.width = window.innerWidth;
+      maskCanvas.height = window.innerHeight;
+      maskCanvas.style.position = 'fixed';
+      maskCanvas.style.top = '0';
+      maskCanvas.style.left = '0';
+      maskCanvas.style.width = '100vw';
+      maskCanvas.style.height = '100vh';
+      maskCanvas.style.zIndex = '9999';
+      maskCanvas.style.pointerEvents = 'none';
+      maskCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
+      maskCanvas.id = 'maskCanvas';
+      document.body.appendChild(maskCanvas);
+      maskCtx = maskCanvas.getContext('2d');
+      maskTmpCanvas = document.createElement('canvas');
+      maskTmpCanvas.width = 224;
+      maskTmpCanvas.height = 224;
     }
 
     // Convert the AR camera WebGL texture directly into a 224x224 tensor
@@ -158,7 +128,8 @@
 
         await loadModel();
 
-        // Use the backend canvas as the mask overlay.
+        // Use the backend canvas for the AR feed and create a separate overlay
+        // canvas for the mask.
         const renderCanvas = gl.canvas;
         if (renderCanvas instanceof HTMLCanvasElement) {
           renderCanvas.width = window.innerWidth;
@@ -168,13 +139,13 @@
           renderCanvas.style.left = '0';
           renderCanvas.style.width = '100vw';
           renderCanvas.style.height = '100vh';
-          renderCanvas.style.zIndex = '10';
+          renderCanvas.style.zIndex = '0';
           renderCanvas.style.pointerEvents = 'none';
           renderCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
-          renderCanvas.id = 'maskCanvas';
+          renderCanvas.id = 'xrCanvas';
           document.body.appendChild(renderCanvas);
         }
-        initMaskPipeline(gl);
+        ensureMaskCanvas();
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -225,16 +196,19 @@
               const inferenceTime = performance.now() - inferenceStart;
               const postStart = performance.now();
 
-              const texData = tf.backend().texData.get(prediction.dataId);
-              const maskTex = Array.isArray(texData?.texture)
-                ? texData.texture[0]
-                : texData?.texture;
-              if (maskTex instanceof WebGLTexture) {
-                drawMaskFromGLTexture(maskTex);
-              } else {
-                logGLInfo('Prediction texture missing or invalid');
-              }
+              const gpuMask = prediction.dataToGPU();
+              const maskTensor = tf.engine().makeTensorFromGPUData(gpuMask, prediction.shape, 'float32');
+              const maskRGBA = tf.tidy(() => {
+                const alpha = maskTensor.clipByValue(0, 1);
+                const color = tf.tensor([1, 0, 0], [1, 1, 3]);
+                return tf.concat([color.tile([224, 224, 1]), alpha.expandDims(-1)], -1);
+              });
+              await tf.browser.toPixels(maskRGBA, maskTmpCanvas);
+              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+              maskCtx.drawImage(maskTmpCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
               const postTime = performance.now() - postStart;
+              maskRGBA.dispose();
+              maskTensor.dispose();
 
             tf.dispose([inputTensor, prediction]);
             processingLock.busy = false;
