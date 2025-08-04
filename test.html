@@ -111,9 +111,9 @@
 
         function onFrame(time, frame) {
           session.requestAnimationFrame(onFrame);
-          try {
-            if (processingLock.busy) return;
+          if (processingLock.busy) return;
 
+          try {
             const pose = frame.getViewerPose(referenceSpace);
             if (!pose) return;
 
@@ -121,14 +121,15 @@
             const tex = glBinding.getCameraImage(view.camera);
             if (!tex) return;
 
+            const internalFormat = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_INTERNAL_FORMAT);
+            const type = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_TYPE);
+            const format = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_FORMAT);
+            log("AR Texture Format:\n" +
+              "InternalFormat: " + internalFormat + "\n" +
+              "Type: " + type + "\n" +
+              "Format: " + format);
+
             processingLock.busy = true;
-
-            const w = view.camera.width;
-            const h = view.camera.height;
-
-            const fb = gl.createFramebuffer();
-            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
             const logicalShape = [224, 224, 3];
             const tensor = tf.tensor({
@@ -139,10 +140,10 @@
             }, logicalShape, 'float32');
 
             const tPreStart = performance.now();
-            const input = tensor.div(255.0).expandDims();
+            const input = tensor.div(255).expandDims();
             const tPreEnd = performance.now();
-            const prediction = model.predict(input).squeeze();
 
+            const prediction = model.predict(input).squeeze();
             prediction.data().then(() => {
               const tPredictEnd = performance.now();
               tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
