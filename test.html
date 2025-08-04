@@ -61,6 +61,7 @@
     let fpsHistory = [];
 
     function log(msg) {
+      console.error(msg);
       document.getElementById('info').textContent = "Status:\n" + msg;
     }
 
@@ -74,7 +75,7 @@
         log('Using custom WebGL backend');
       } catch (e) {
         log('Backend init failed: ' + e.message);
-        return;
+        throw e;
       }
 
       try {
@@ -82,114 +83,109 @@
         log("Model loaded\n");
       } catch (e) {
         log('Model load failed: ' + e.message);
+        throw e;
       }
     }
 
     async function startAR() {
-      log("Starting AR...");
-      await loadModel();
-
-      const canvas = document.createElement('canvas');
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      document.body.appendChild(canvas);
-      gl = canvas.getContext('webgl', { xrCompatible: true });
-
       try {
+        log("Starting AR...");
+        await loadModel();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        document.body.appendChild(canvas);
+        gl = canvas.getContext('webgl', { xrCompatible: true });
+
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
           domOverlay: { root: document.body }
         });
-      } catch (e) {
-        log('Failed to start AR session: ' + e.message);
-        return;
-      }
 
-      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-      const referenceSpace = await session.requestReferenceSpace('local');
-      glBinding = new XRWebGLBinding(session, gl);
+        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+        const referenceSpace = await session.requestReferenceSpace('local');
+        glBinding = new XRWebGLBinding(session, gl);
 
-      let lastFrameTime = performance.now();
+        let lastFrameTime = performance.now();
 
-      function onFrame(time, frame) {
-        if (processingLock.busy) {
+        function onFrame(time, frame) {
           session.requestAnimationFrame(onFrame);
-          return;
-        }
+          try {
+            if (processingLock.busy) return;
 
-        const pose = frame.getViewerPose(referenceSpace);
-        if (!pose) {
-          session.requestAnimationFrame(onFrame);
-          return;
-        }
+            const pose = frame.getViewerPose(referenceSpace);
+            if (!pose) return;
 
-        const view = pose.views[0];
-        const tex = glBinding.getCameraImage(view.camera);
-        if (!tex) {
-          session.requestAnimationFrame(onFrame);
-          return;
-        }
+            const view = pose.views[0];
+            const tex = glBinding.getCameraImage(view.camera);
+            if (!tex) return;
 
-        processingLock.busy = true;
+            processingLock.busy = true;
 
-        const w = view.camera.width;
-        const h = view.camera.height;
+            const w = view.camera.width;
+            const h = view.camera.height;
 
-        const fb = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            const fb = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-        const logicalShape = [224, 224, 3];
-        const tensor = tf.tensor({
-          texture: tex,
-          height: 224,
-          width: 224,
-          channels: 'RGB'
-        }, logicalShape, 'float32');
+            const logicalShape = [224, 224, 3];
+            const tensor = tf.tensor({
+              texture: tex,
+              height: 224,
+              width: 224,
+              channels: 'RGB'
+            }, logicalShape, 'float32');
 
-        const tPreStart = performance.now();
-        const input = tensor.div(255.0).expandDims();
-        const tPreEnd = performance.now();
-        const prediction = model.predict(input).squeeze();
+            const tPreStart = performance.now();
+            const input = tensor.div(255.0).expandDims();
+            const tPreEnd = performance.now();
+            const prediction = model.predict(input).squeeze();
 
-        prediction.data().then(() => {
-          const tPredictEnd = performance.now();
-          tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-            const tPostEnd = performance.now();
+            prediction.data().then(() => {
+              const tPredictEnd = performance.now();
+              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+                const tPostEnd = performance.now();
 
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+                maskCanvas.width = window.innerWidth;
+                maskCanvas.height = window.innerHeight;
+                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-            tf.dispose([input, prediction, tensor]);
+                tf.dispose([input, prediction, tensor]);
+                processingLock.busy = false;
+
+                const now = performance.now();
+                const frameTime = now - lastFrameTime;
+                lastFrameTime = now;
+                fpsHistory.push(1000 / frameTime);
+                if (fpsHistory.length > 30) fpsHistory.shift();
+                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+                log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+              }).catch(err => {
+                log("Postprocess error: " + err.message);
+                processingLock.busy = false;
+              });
+            }).catch(err => {
+              log("Prediction error: " + err.message);
+              processingLock.busy = false;
+            });
+          } catch (err) {
+            log("Frame error: " + err.message);
             processingLock.busy = false;
+          }
+        }
 
-            const now = performance.now();
-            const frameTime = now - lastFrameTime;
-            lastFrameTime = now;
-            fpsHistory.push(1000 / frameTime);
-            if (fpsHistory.length > 30) fpsHistory.shift();
-            const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-
-            log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
-
-            session.requestAnimationFrame(onFrame);
-          });
-        });
-      }
-
-      session.requestAnimationFrame(onFrame);
-      document.getElementById('startBtn').style.display = 'none';
-    }
-
-    document.getElementById('startBtn').addEventListener('click', () => {
-      try {
-        startAR();
+        session.requestAnimationFrame(onFrame);
+        document.getElementById('startBtn').style.display = 'none';
       } catch (e) {
         log('Unexpected error: ' + e.message);
       }
-    });
+    }
+
+    document.getElementById('startBtn').addEventListener('click', startAR);
   </script>
 </body>
 </html>
