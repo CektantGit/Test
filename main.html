@@ -14,6 +14,8 @@
     canvas { display: block; }
     .overlay { position: absolute; bottom: 10px; right: 10; z-index: 13; }
     .overlay2 {  display: block;  position: absolute;  top: 0;  left: 0;  width: 100%;  height: 100%;  z-index: 10;}
+    #maskCanvas { width: 100%; height: 100%; transform: scaleX(-1); }
+    #inputView { position: absolute; top: 0; left: 0; width: 112px; height: 112px; border: 1px solid red; z-index: 11; }
     .button { display: block; margin: 5px 0; padding: 10px;  z-index: 12; background: rgba(0, 0, 0, 0.5); color: white; border: none; border-radius: 5px; cursor: pointer; }
     .info { position: absolute; bottom: 35px; right: 50px; z-index: 12; background: rgba(0, 0, 0, 0.5); color: white; padding: 10px; border-radius: 5px; }
     #startARBtn { position: absolute; top: 10px; left: 10px; z-index: 12; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
@@ -29,7 +31,8 @@
 </div>
 
 <div class="overlay2">
-  <img id="maskImage"/>
+  <canvas id="maskCanvas"></canvas>
+  <canvas id="inputView"></canvas>
 </div>
 
   
@@ -42,6 +45,16 @@
     const captures = [];
     let model;
     let resources;
+    let maskCanvas, inputView;
+    let lastFrameTime = performance.now();
+    let fpsHistory = [];
+
+    maskCanvas = document.getElementById('maskCanvas');
+    maskCanvas.width = 224;
+    maskCanvas.height = 224;
+    inputView = document.getElementById('inputView');
+    inputView.width = 224;
+    inputView.height = 224;
     
     async function loadModel() {
       try {
@@ -315,44 +328,41 @@ async function captureImage(gl, glBinding, dcamera, resources) {
   let imageData = new ImageData(flippedPixels, width, height);
   context.putImageData(imageData, 0, 0);
 
+  const preprocessStart = performance.now();
   const imgTensor = tf.browser.fromPixels(canvas, 3);
   const normalizedImgTensor = imgTensor.div(255.0);
   const resizedImgTensor = tf.image.resizeBilinear(normalizedImgTensor, [224, 224]);
   const batchedImgTensor = resizedImgTensor.expandDims();
+  const preprocessTime = performance.now() - preprocessStart;
 
   try {
-    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ':' + new Date().getMilliseconds();
-    const predictions = await model.predict(batchedImgTensor);
-    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString('en-GB', { hour12: false }) + ':' + new Date().getMilliseconds();
-    document.getElementById('info').innerText += '\n' + new Date().toLocaleTimeString();
+    const inferenceStart = performance.now();
+    const prediction = model.predict(batchedImgTensor).squeeze();
+    await prediction.data();
+    const inferenceTime = performance.now() - inferenceStart;
 
-    console.log("Model predictions:", predictions);
-    document.getElementById('info').innerText += "Start convert predict";
-    
-    // Process and display predictions
-    const unetMask = predictions;
-    const unetMaskArray = unetMask.dataSync();
-    document.getElementById('info').innerText += "datasync";
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = 224;
-    maskCanvas.height = 224;
-    const maskCtx = maskCanvas.getContext('2d');
-    const maskImageData = maskCtx.createImageData(224, 224);
-
-    for (let i = 0; i < 224 * 224; i++) {
-      const value = unetMaskArray[i] * 255;
-      maskImageData.data[i * 4] = value; // R
-      maskImageData.data[i * 4 + 1] = value; // G
-      maskImageData.data[i * 4 + 2] = value; // B
-      maskImageData.data[i * 4 + 3] = 255; // A
-    }
-
-    maskCtx.putImageData(maskImageData, 0, 0);
-
-    const maskImageElement = document.getElementById('maskImage');
-    maskImageElement.src = maskCanvas.toDataURL('image/png');
+    const postStart = performance.now();
+    await tf.browser.toPixels(resizedImgTensor, inputView);
+    const mask = tf.sub(1, prediction);
+    await tf.browser.toPixels(mask, maskCanvas);
+    const postTime = performance.now() - postStart;
 
     document.querySelector('.overlay').style.display = 'block';
+
+    tf.dispose([imgTensor, normalizedImgTensor, resizedImgTensor, batchedImgTensor, prediction, mask]);
+
+    const now = performance.now();
+    const frameTime = now - lastFrameTime;
+    lastFrameTime = now;
+    fpsHistory.push(1000 / frameTime);
+    if (fpsHistory.length > 30) fpsHistory.shift();
+    const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+
+    document.getElementById('info').innerText =
+      `Preprocess: ${preprocessTime.toFixed(1)} ms\n` +
+      `Inference: ${inferenceTime.toFixed(1)} ms\n` +
+      `Postprocess: ${postTime.toFixed(1)} ms\n` +
+      `FPS: ${avgFps.toFixed(1)}`;
 
   } catch (error) {
     console.error('Error during model prediction:', error);
