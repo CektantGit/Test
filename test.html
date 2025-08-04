@@ -76,20 +76,18 @@
       document.getElementById('glInfo').textContent = msg;
     }
 
-    // Convert the AR camera WebGL texture directly into a normalized
-    // 224x224 tensor without syncing through the CPU. The AR camera uses an
-    // RGBA texture format (internal format 5090 in some browsers). We drop the
-    // alpha channel and scale pixel values to [0,1].
+    // Convert the AR camera WebGL texture directly into a 224x224 tensor
+    // without syncing through the CPU. The AR camera provides an RGBA texture,
+    // so we select only the RGB channels. The texture's pixels are already
+    // normalized floats in [0,1], so no additional scaling is required.
     function preprocessTexture(tex, width, height) {
       return tf.tidy(() => {
-        const webglData = { texture: tex, width, height, channels: 'RGBA' };
-        // Create a tensor backed by the same WebGL context.
-        const rgba = tf.tensor(webglData, [height, width, 4], 'float32');
-        // Remove alpha channel, resize to the model's expected input and
-        // normalize.
-        const rgb = tf.slice(rgba, [0, 0, 0], [-1, -1, 3]);
+        const rgb = tf.tensor(
+          { texture: tex, width, height, channels: 'RGB' },
+          [height, width, 3],
+          'float32'
+        );
         return tf.image.resizeBilinear(rgb, [224, 224])
-          .div(255)
           .expandDims();
       });
     }
