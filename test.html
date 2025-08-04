@@ -17,6 +17,17 @@
       pointer-events: none;
       transform: rotate(180deg) scaleX(-1);
     }
+    #inputPreview {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 112px;
+      height: 112px;
+      z-index: 10000;
+      border: 1px solid white;
+      pointer-events: none;
+      transform: rotate(180deg) scaleX(-1);
+    }
     #info {
       position: absolute;
       bottom: 10px;
@@ -46,6 +57,7 @@
 <body>
   <button id="startBtn">Start AR Segmentation</button>
   <canvas id="maskCanvas"></canvas>
+  <canvas id="inputPreview" width="224" height="224"></canvas>
   <div id="info">Status: idle</div>
 
   <script>
@@ -55,6 +67,8 @@
     let posLoc, texLoc, samplerLoc;
     const maskCanvas = document.getElementById('maskCanvas');
     const maskCtx = maskCanvas.getContext('2d');
+    const inputCanvas = document.getElementById('inputPreview');
+    const inputCtx = inputCanvas.getContext('2d');
     let fpsHistory = [];
 
     const logElem = document.getElementById('info');
@@ -115,7 +129,7 @@
       gl.vertexAttribPointer(texLoc, 2, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       // Ensure the camera frame is fully rendered before it's read back.
-      gl.flush();
+      gl.finish();
       return true;
     }
 
@@ -239,7 +253,23 @@
         await preprocessReadback.mapAsync(GPUMapMode.READ);
         const mapped = preprocessReadback.getMappedRange().slice(0);
         preprocessReadback.unmap();
-        return tf.tensor(new Float32Array(mapped), [1, 224, 224, 3]);
+        const floatData = new Float32Array(mapped);
+
+        if (inputCanvas.width !== 224 || inputCanvas.height !== 224) {
+          inputCanvas.width = 224;
+          inputCanvas.height = 224;
+        }
+        const clamped = new Uint8ClampedArray(224 * 224 * 4);
+        for (let i = 0, j = 0; i < floatData.length; i += 3, j += 4) {
+          clamped[j] = floatData[i] * 255;
+          clamped[j + 1] = floatData[i + 1] * 255;
+          clamped[j + 2] = floatData[i + 2] * 255;
+          clamped[j + 3] = 255;
+        }
+        const imgData = new ImageData(clamped, 224, 224);
+        inputCtx.putImageData(imgData, 0, 0);
+
+        return tf.tensor(floatData, [1, 224, 224, 3]);
       } catch (e) {
         log('preprocess failed: ' + e.message);
         throw e;
