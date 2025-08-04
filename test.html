@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Fast AR Segmentation</title>
+  <title>AR Segmentation (Original Working Version)</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.16.0"></script>
   <style>
@@ -27,7 +27,6 @@
       font-family: monospace;
       font-size: 12px;
       z-index: 20;
-      white-space: pre-wrap;
     }
     #startBtn {
       position: absolute;
@@ -106,7 +105,9 @@
           tempCtx.clearRect(0, 0, 224, 224);
           tempCtx.drawImage(img, 0, 0, 224, 224);
 
-          const input = tf.tidy(() => tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims());
+          const input = tf.tidy(() =>
+            tf.browser.fromPixels(tempCanvas).toFloat().div(255).expandDims()
+          );
           await tf.nextFrame();
           const t1 = performance.now();
 
@@ -114,7 +115,9 @@
           await tf.nextFrame();
           const t2 = performance.now();
 
-          const mask = tf.tidy(() => tf.sub(1, prediction.squeeze()).clipByValue(0, 1));
+          const mask = tf.tidy(() =>
+            tf.sub(1, prediction.squeeze()).clipByValue(0, 1)
+          );
           await tf.browser.toPixels(mask, maskCanvas);
           mask.dispose();
           tf.dispose([input, prediction]);
