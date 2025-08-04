@@ -51,15 +51,11 @@
   <div id="glInfo"></div>
 
   <script>
+    // Global state variables. They are initialized only after the DOM is
+    // fully ready to avoid accessing elements before they exist.
     let model, gl, session, glBinding;
-    const maskCanvas = document.getElementById('maskCanvas');
-    const maskCtx = maskCanvas.getContext('2d');
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = 224;
-    tempCanvas.height = 224;
-    const tempCtx = tempCanvas.getContext('2d');
-    const processingLock = { busy: false };
-    let fpsHistory = [];
+    let maskCanvas, maskCtx, tempCanvas;
+    let processingLock, fpsHistory;
 
     function log(msg) {
       console.error(msg);
@@ -190,18 +186,40 @@
       }
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
+    // Initialize DOM-dependent variables and attach the start button handler
+    // once the document is ready. This ensures nothing runs before the user
+    // explicitly clicks the button.
+    function init() {
+      maskCanvas = document.getElementById('maskCanvas');
+      if (!maskCanvas) {
+        log('maskCanvas is invalid or not found');
+        return;
+      }
+      maskCtx = maskCanvas.getContext('2d');
+
+      tempCanvas = document.createElement('canvas');
+      tempCanvas.width = 224;
+      tempCanvas.height = 224;
+
+      processingLock = { busy: false };
+      fpsHistory = [];
+
       const btn = document.getElementById('startBtn');
-      if (!btn) {
+      if (!btn || typeof btn.addEventListener !== 'function') {
         log('startBtn is invalid or not found');
         return;
       }
 
-      // Attach handler once the element is confirmed to exist. This avoids
-      // "a.addEventListener is not a function" errors when the element lookup
-      // returns something other than a DOM node.
-      btn.addEventListener('click', startAR);
-    });
+      // Attach handler only after confirming the button exists to avoid
+      // "a.addEventListener is not a function" errors.
+      btn.addEventListener('click', startAR, { once: true });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
