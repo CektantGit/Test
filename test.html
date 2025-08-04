@@ -79,7 +79,6 @@
     function log(msg) {
       console.error(msg);
       const infoEl = document.getElementById('info');
-      if (infoEl.textContent.includes(msg)) return;
       infoEl.textContent = "Status:\n" + msg;
     }
 
@@ -88,13 +87,9 @@
       el.textContent = msg;
     }
 
-    async function loadModel() {
+    async function loadModel(glContext) {
       try {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1;
-        canvas.height = 1;
-        const glCtx = canvas.getContext('webgl');
-        const customBackend = new tf.MathBackendWebGL(glCtx);
+        const customBackend = new tf.MathBackendWebGL(glContext);
         tf.registerBackend('custom-webgl', () => customBackend);
         await tf.setBackend('custom-webgl');
         await tf.ready();
@@ -116,13 +111,14 @@
     async function startAR() {
       try {
         log("Starting AR...");
-        await loadModel();
 
         const canvas = document.createElement('canvas');
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         document.body.appendChild(canvas);
         gl = canvas.getContext('webgl', { xrCompatible: true });
+
+        await loadModel(gl);
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -154,55 +150,58 @@
 
             const w = view.camera.width;
             const h = view.camera.height;
-
             logGLInfo(`AR Image: ${w}x${h}\nTex: ${tex}`);
 
             const fb = gl.createFramebuffer();
             gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
 
-            const logicalShape = [224, 224, 3];
-            const tensor = tf.tensor({
-              texture: tex,
-              height: 224,
-              width: 224,
-              channels: 'RGB'
-            }, logicalShape, 'float32');
+            try {
+              const tensor = tf.tensor({
+                texture: tex,
+                height: 224,
+                width: 224,
+                channels: 'RGB'
+              }, [224, 224, 3], 'float32');
 
-            const tPreStart = performance.now();
-            const input = tensor.div(255.0).expandDims();
-            const tPreEnd = performance.now();
+              const tPreStart = performance.now();
+              const input = tensor.div(255.0).expandDims();
+              const tPreEnd = performance.now();
 
-            const prediction = model.predict(input).squeeze();
-            prediction.data().then(() => {
-              const tPredictEnd = performance.now();
-              tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
-                const tPostEnd = performance.now();
+              const prediction = model.predict(input).squeeze();
+              prediction.data().then(() => {
+                const tPredictEnd = performance.now();
+                tf.browser.toPixels(tf.sub(1, prediction), tempCanvas).then(() => {
+                  const tPostEnd = performance.now();
 
-                maskCanvas.width = window.innerWidth;
-                maskCanvas.height = window.innerHeight;
-                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+                  maskCanvas.width = window.innerWidth;
+                  maskCanvas.height = window.innerHeight;
+                  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                  maskCtx.drawImage(tempCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
 
-                tf.dispose([input, prediction, tensor]);
-                processingLock.busy = false;
+                  tf.dispose([input, prediction, tensor]);
+                  processingLock.busy = false;
 
-                const now = performance.now();
-                const frameTime = now - lastFrameTime;
-                lastFrameTime = now;
-                fpsHistory.push(1000 / frameTime);
-                if (fpsHistory.length > 30) fpsHistory.shift();
-                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+                  const now = performance.now();
+                  const frameTime = now - lastFrameTime;
+                  lastFrameTime = now;
+                  fpsHistory.push(1000 / frameTime);
+                  if (fpsHistory.length > 30) fpsHistory.shift();
+                  const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
 
-                log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+                  log(`Pre: ${(tPreEnd - tPreStart).toFixed(1)}ms\nInfer: ${(tPredictEnd - tPreEnd).toFixed(1)}ms\nPost: ${(tPostEnd - tPredictEnd).toFixed(1)}ms\nFPS: ${avgFps.toFixed(1)}`);
+                }).catch(err => {
+                  log("Postprocess error: " + err.message);
+                  processingLock.busy = false;
+                });
               }).catch(err => {
-                log("Postprocess error: " + err.message);
+                log("Prediction error: " + err.message);
                 processingLock.busy = false;
               });
-            }).catch(err => {
-              log("Prediction error: " + err.message);
+            } catch (tensorErr) {
+              log("Tensor creation failed: " + tensorErr.message);
               processingLock.busy = false;
-            });
+            }
           } catch (err) {
             log("Frame error: " + err.message);
             processingLock.busy = false;
@@ -218,7 +217,11 @@
 
     window.addEventListener('load', () => {
       const btn = document.getElementById('startBtn');
-      if (btn) btn.addEventListener('click', startAR);
+      if (btn && typeof btn.addEventListener === 'function') {
+        btn.addEventListener('click', startAR);
+      } else {
+        log('startBtn is not a valid element or lacks addEventListener');
+      }
     });
   </script>
 </body>
