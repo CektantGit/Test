@@ -67,7 +67,11 @@ out vec4 out_color;
 void main() {
   vec2 coord = vec2(1.0 - tex_coord[0], tex_coord[1]);
   vec4 src_color = texture(frame, coord).rgba;
-  float probability = texture(mask, coord).a;
+  // The mask texture is a single-channel (R) image where the alpha channel
+  // defaults to 1.0. Sampling the alpha channel would therefore always yield
+  // 1.0 and result in the raw camera feed without any overlay. Use the red
+  // channel to read the actual mask probability values.
+  float probability = texture(mask, coord).r;
   if (probability > 0.5) {
     out_color = vec4(src_color.rgb, 1.0);
   } else {
