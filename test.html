@@ -8,15 +8,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
     body { margin: 0; overflow: hidden; }
-    #maskCanvas {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 10;
-      pointer-events: none;
-      transform: rotate(180deg) scaleX(-1);
-    }
     #info, #glInfo {
       position: absolute;
       font-family: monospace;
@@ -46,7 +37,6 @@
 </head>
 <body>
   <button id="startBtn">Start AR Segmentation</button>
-  <canvas id="maskCanvas"></canvas>
   <div id="info">Status: idle</div>
   <div id="glInfo"></div>
 
@@ -54,8 +44,176 @@
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
       let model, gl, session, glBinding;
-      let maskCanvas, maskCtx;
     let processingLock, fpsHistory;
+    let applyMask;
+
+    // ---- GPU mask post-processing utilities (adapted from tfjs-examples/gpu-pipeline) ----
+    const PASSTHROUGH_VERTEX_SHADER = `#version 300 es
+precision highp float;
+in vec4 position;
+in vec4 input_tex_coord;
+out vec2 tex_coord;
+void main() {
+  gl_Position = position;
+  tex_coord = input_tex_coord.xy;
+}`;
+
+    const MASK_SHADER = `#version 300 es
+precision mediump float;
+uniform sampler2D frame;
+uniform sampler2D mask;
+in highp vec2 tex_coord;
+out vec4 out_color;
+void main() {
+  vec2 coord = vec2(1.0 - tex_coord[0], tex_coord[1]);
+  vec4 src_color = texture(frame, coord).rgba;
+  float probability = texture(mask, coord).a;
+  if (probability > 0.5) {
+    out_color = vec4(src_color.rgb, 1.0);
+  } else {
+    vec4 purple = vec4(0.365, 0.247, 0.827, 1.0);
+    out_color = 0.5 * purple + 0.5 * src_color;
+  }
+}`;
+
+    class GlTextureImpl {
+      constructor(gl, texture, width, height) {
+        this.gl_ = gl;
+        this.texture_ = texture;
+        this.width = width;
+        this.height = height;
+      }
+      bindTexture() {
+        this.gl_.bindTexture(this.gl_.TEXTURE_2D, this.texture_);
+      }
+    }
+
+    class GlTextureFramebuffer extends GlTextureImpl {
+      constructor(gl, framebuffer, texture, width, height) {
+        super(gl, texture, width, height);
+        this.framebuffer_ = framebuffer;
+      }
+      bindFramebuffer() {
+        this.gl_.bindFramebuffer(this.gl_.FRAMEBUFFER, this.framebuffer_);
+        this.gl_.viewport(0, 0, this.width, this.height);
+      }
+    }
+
+    class GlProgramImpl {
+      constructor(gl, program) {
+        this.gl_ = gl;
+        this.program_ = program;
+        this.cachedUniformLocations_ = new Map();
+      }
+      useProgram() {
+        this.gl_.useProgram(this.program_);
+      }
+      getUniformLocation(symbol) {
+        if (!this.cachedUniformLocations_.has(symbol)) {
+          const loc = this.gl_.getUniformLocation(this.program_, symbol);
+          this.cachedUniformLocations_.set(symbol, loc);
+        }
+        return this.cachedUniformLocations_.get(symbol);
+      }
+    }
+
+    class FullscreenQuad {
+      constructor(gl) {
+        this.gl_ = gl;
+        this.squareBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.squareBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        this.texBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.texBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0,1,0,0,1,1,1]), gl.STATIC_DRAW);
+      }
+      draw() {
+        const gl = this.gl_;
+        gl.enableVertexAttribArray(0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.squareBuffer);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(1);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.texBuffer);
+        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    }
+
+    class GlShaderProcessor {
+      constructor(gl, shader) {
+        this.gl = gl;
+        this.quad = new FullscreenQuad(gl);
+        this.program = createProgram(gl, PASSTHROUGH_VERTEX_SHADER, shader);
+      }
+      startProcessFrame(width, height) {
+        if (!this.frame || this.frame.width !== width || this.frame.height !== height) {
+          this.frame = createTextureFrameBuffer(this.gl, this.gl.LINEAR, width, height);
+        }
+        this.gl.viewport(0, 0, width, height);
+        this.program.useProgram();
+      }
+      bindTextures(textures) {
+        let unit = 0;
+        for (const [name, tex] of textures) {
+          const loc = this.program.getUniformLocation(name);
+          this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+          tex.bindTexture();
+          this.gl.uniform1i(loc, unit);
+          unit++;
+        }
+      }
+      finalizeProcessFrame() {
+        this.frame.bindFramebuffer();
+        this.quad.draw();
+        return this.frame;
+      }
+    }
+
+    class MaskStep {
+      constructor(gl) {
+        this.proc = new GlShaderProcessor(gl, MASK_SHADER);
+      }
+      process(frame, mask) {
+        this.proc.startProcessFrame(frame.width, frame.height);
+        this.proc.bindTextures([['frame', frame], ['mask', mask]]);
+        return this.proc.finalizeProcessFrame();
+      }
+    }
+
+    function createTextureFrameBuffer(gl, filterMode, width, height) {
+      const framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filterMode);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filterMode);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      return new GlTextureFramebuffer(gl, framebuffer, texture, width, height);
+    }
+
+    function createTexture(gl, texture, width, height) {
+      return new GlTextureImpl(gl, texture, width, height);
+    }
+
+    function createProgram(gl, vertexSrc, fragmentSrc) {
+      const vs = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs, vertexSrc);
+      gl.compileShader(vs);
+      const fs = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs, fragmentSrc);
+      gl.compileShader(fs);
+      const program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.bindAttribLocation(program, 0, 'position');
+      gl.bindAttribLocation(program, 1, 'input_tex_coord');
+      gl.linkProgram(program);
+      return new GlProgramImpl(gl, program);
+    }
+    // ---- End GPU mask utilities ----
 
     function log(msg) {
       console.error(msg);
@@ -103,6 +261,7 @@
           }
         }
         log('Using WebGL backend');
+        applyMask = new MaskStep(gl);
         model = await tf.loadLayersModel('jsModel/model.json');
         log("Model loaded");
       } catch (e) {
@@ -175,27 +334,20 @@
               await tf.nextFrame();
               const inferenceTime = performance.now() - inferenceStart;
               const postStart = performance.now();
-              const unetMaskArray = prediction.dataSync();
 
-              
-              maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              const maskImageData = maskCtx.createImageData(224, 224);
-
-              for (let y = 0; y < 224; y++) {
-                for (let x = 0; x < 224; x++) {
-                  const value = unetMaskArray[y * 224 + x] * 255;
-                  const idx = (y * 224 + x) * 4;
-                  maskImageData.data[idx + 0] = 255 - value;
-                  maskImageData.data[idx + 1] = 255 - value;
-                  maskImageData.data[idx + 2] = 255 - value;
-                  maskImageData.data[idx + 3] = 255 - value;
-                }
-              }
-
-              maskCtx.putImageData(maskImageData, 0, 0);
+              const maskTensor = prediction.expandDims(-1);
+              const resizedMask = tf.image.resizeBilinear(maskTensor, [texHeight, texWidth]);
+              const maskData = resizedMask.dataToGPU({customTexShape: [texHeight, texWidth]});
+              const frameTex = createTexture(gl, tex, texWidth, texHeight);
+              const maskTex = createTexture(gl, maskData.texture, texWidth, texHeight);
+              const result = applyMask.process(frameTex, maskTex);
+              gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+              gl.bindFramebuffer(gl.READ_FRAMEBUFFER, result.framebuffer_);
+              gl.blitFramebuffer(0, 0, texWidth, texHeight, 0, texHeight, texWidth, 0, gl.COLOR_BUFFER_BIT, gl.NEAREST);
               const postTime = performance.now() - postStart;
 
-            tf.dispose([inputTensor, prediction]);
+            maskData.tensorRef.dispose();
+            tf.dispose([inputTensor, prediction, maskTensor, resizedMask]);
             processingLock.busy = false;
 
             const now = performance.now();
@@ -226,15 +378,6 @@
     // once the document is ready. This ensures nothing runs before the user
     // explicitly clicks the button.
     function init() {
-      maskCanvas = document.getElementById('maskCanvas');
-      if (!maskCanvas) {
-        log('maskCanvas is invalid or not found');
-        return;
-      }
-      maskCtx = maskCanvas.getContext('2d');
-      maskCanvas.width = 224;
-      maskCanvas.height = 224;
-
       processingLock = { busy: false };
       fpsHistory = [];
 
