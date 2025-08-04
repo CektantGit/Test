@@ -8,6 +8,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
     body { margin: 0; overflow: hidden; }
+    #maskCanvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+      pointer-events: none;
+      transform: rotate(180deg) scaleX(-1);
+    }
     #info, #glInfo {
       position: absolute;
       font-family: monospace;
@@ -36,16 +45,17 @@
   </style>
 </head>
 <body>
-    <button id="startBtn">Start AR Segmentation</button>
-    <div id="info">Status: idle</div>
-    <div id="glInfo"></div>
+  <button id="startBtn">Start AR Segmentation</button>
+  <canvas id="maskCanvas"></canvas>
+  <div id="info">Status: idle</div>
+  <div id="glInfo"></div>
 
   <script>
     // Global state variables. They are initialized only after the DOM is
     // fully ready to avoid accessing elements before they exist.
       let model, gl, session, glBinding;
+      let maskCanvas, maskCtx;
     let processingLock, fpsHistory;
-    let maskCanvas, maskCtx, maskTmpCanvas;
 
     function log(msg) {
       console.error(msg);
@@ -54,27 +64,6 @@
 
     function logGLInfo(msg) {
       document.getElementById('glInfo').textContent = msg;
-    }
-
-    function ensureMaskCanvas() {
-      if (maskCanvas) return;
-      maskCanvas = document.createElement('canvas');
-      maskCanvas.width = window.innerWidth;
-      maskCanvas.height = window.innerHeight;
-      maskCanvas.style.position = 'fixed';
-      maskCanvas.style.top = '0';
-      maskCanvas.style.left = '0';
-      maskCanvas.style.width = '100vw';
-      maskCanvas.style.height = '100vh';
-      maskCanvas.style.zIndex = '9999';
-      maskCanvas.style.pointerEvents = 'none';
-      maskCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
-      maskCanvas.id = 'maskCanvas';
-      document.body.appendChild(maskCanvas);
-      maskCtx = maskCanvas.getContext('2d');
-      maskTmpCanvas = document.createElement('canvas');
-      maskTmpCanvas.width = 224;
-      maskTmpCanvas.height = 224;
     }
 
     // Convert the AR camera WebGL texture directly into a 224x224 tensor
@@ -128,24 +117,15 @@
 
         await loadModel();
 
-        // Use the backend canvas for the AR feed and create a separate overlay
-        // canvas for the mask.
+        // TensorFlow.js may provide an OffscreenCanvas as the WebGL backend's canvas.
+        // OffscreenCanvas is not a DOM node and cannot be appended to the document,
+        // so only append when the canvas is an HTMLCanvasElement.
         const renderCanvas = gl.canvas;
         if (renderCanvas instanceof HTMLCanvasElement) {
           renderCanvas.width = window.innerWidth;
           renderCanvas.height = window.innerHeight;
-          renderCanvas.style.position = 'fixed';
-          renderCanvas.style.top = '0';
-          renderCanvas.style.left = '0';
-          renderCanvas.style.width = '100vw';
-          renderCanvas.style.height = '100vh';
-          renderCanvas.style.zIndex = '0';
-          renderCanvas.style.pointerEvents = 'none';
-          renderCanvas.style.transform = 'rotate(180deg) scaleX(-1)';
-          renderCanvas.id = 'xrCanvas';
           document.body.appendChild(renderCanvas);
         }
-        ensureMaskCanvas();
 
         session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['camera-access', 'dom-overlay'],
@@ -195,20 +175,25 @@
               await tf.nextFrame();
               const inferenceTime = performance.now() - inferenceStart;
               const postStart = performance.now();
+              const unetMaskArray = prediction.dataSync();
 
-              const gpuMask = prediction.dataToGPU();
-              const maskTensor = tf.engine().makeTensorFromGPUData(gpuMask, prediction.shape, 'float32');
-              const maskRGBA = tf.tidy(() => {
-                const alpha = maskTensor.clipByValue(0, 1);
-                const color = tf.tensor([1, 0, 0], [1, 1, 3]);
-                return tf.concat([color.tile([224, 224, 1]), alpha.expandDims(-1)], -1);
-              });
-              await tf.browser.toPixels(maskRGBA, maskTmpCanvas);
+              
               maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-              maskCtx.drawImage(maskTmpCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+              const maskImageData = maskCtx.createImageData(224, 224);
+
+              for (let y = 0; y < 224; y++) {
+                for (let x = 0; x < 224; x++) {
+                  const value = unetMaskArray[y * 224 + x] * 255;
+                  const idx = (y * 224 + x) * 4;
+                  maskImageData.data[idx + 0] = 255 - value;
+                  maskImageData.data[idx + 1] = 255 - value;
+                  maskImageData.data[idx + 2] = 255 - value;
+                  maskImageData.data[idx + 3] = 255 - value;
+                }
+              }
+
+              maskCtx.putImageData(maskImageData, 0, 0);
               const postTime = performance.now() - postStart;
-              maskRGBA.dispose();
-              maskTensor.dispose();
 
             tf.dispose([inputTensor, prediction]);
             processingLock.busy = false;
@@ -241,6 +226,15 @@
     // once the document is ready. This ensures nothing runs before the user
     // explicitly clicks the button.
     function init() {
+      maskCanvas = document.getElementById('maskCanvas');
+      if (!maskCanvas) {
+        log('maskCanvas is invalid or not found');
+        return;
+      }
+      maskCtx = maskCanvas.getContext('2d');
+      maskCanvas.width = 224;
+      maskCanvas.height = 224;
+
       processingLock = { busy: false };
       fpsHistory = [];
 
