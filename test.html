@@ -223,11 +223,17 @@
 
     async function preprocess(source) {
       try {
+        // createImageBitmap ensures the WebGL canvas is fully resolved before
+        // copying it into a WebGPU texture. Without this step the texture copy
+        // may read back an empty (black) frame on some browsers.
+        const bitmap = await createImageBitmap(source);
         queue.copyExternalImageToTexture(
-          { source, flipY: true },
+          { source: bitmap, flipY: true },
           { texture: cameraTexture },
           [224, 224]
         );
+        // We no longer need the bitmap after it has been copied to the GPU.
+        bitmap.close();
         await queue.onSubmittedWorkDone();
         const bind = device.createBindGroup({
           layout: preprocessPipeline.getBindGroupLayout(0),
