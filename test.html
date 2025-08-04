@@ -202,7 +202,8 @@
         if (maskTensor.dtype !== 'float32') {
           tensor = maskTensor.toFloat();
         }
-        const data = await tensor.data();
+        const raw = await tensor.data();
+        const data = raw instanceof Float32Array ? raw : new Float32Array(raw);
         if (tensor !== maskTensor) tensor.dispose();
         const upload = device.createBuffer({
           size: data.byteLength,
@@ -234,9 +235,10 @@
         // this requirement, otherwise WebGPU throws "offset is out of bounds".
         const bytesPerPixel = 4;
         const alignedBytesPerRow = Math.ceil((224 * bytesPerPixel) / 256) * 256;
+        const rowsPerImage = 224;
 
         const readback = device.createBuffer({
-          size: alignedBytesPerRow * 224,
+          size: alignedBytesPerRow * rowsPerImage,
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         });
         encoder.copyTextureToBuffer(
@@ -244,6 +246,7 @@
           {
             buffer: readback,
             bytesPerRow: alignedBytesPerRow,
+            rowsPerImage,
           },
           { width: 224, height: 224, depthOrArrayLayers: 1 }
         );
