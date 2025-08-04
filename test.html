@@ -55,6 +55,22 @@
     const maskCtx = maskCanvas.getContext('2d');
     let fpsHistory = [];
 
+    const logElem = document.getElementById('info');
+    const logLines = [];
+    function log(msg) {
+      logLines.push(msg);
+      logElem.textContent = logLines.join('\n');
+      console.log(msg);
+    }
+
+    window.addEventListener('error', e => {
+      log(`Error: ${e.message}`);
+    });
+
+    window.addEventListener('unhandledrejection', e => {
+      log(`Unhandled: ${e.reason}`);
+    });
+
     // WebGPU resources for fully GPU-based pre/post processing
     const PREPROCESS_WGSL = `
       @group(0) @binding(0) var cameraTex : texture_external;
@@ -90,122 +106,154 @@
     let preprocessBuffer, postprocessTexture, sampler;
 
     async function initGPU() {
-      const adapter = await navigator.gpu.requestAdapter();
-      device = await adapter.requestDevice();
-      queue = device.queue;
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        device = await adapter.requestDevice();
+        queue = device.queue;
 
-      preprocessPipeline = device.createComputePipeline({
-        compute: {
-          module: device.createShaderModule({ code: PREPROCESS_WGSL }),
-          entryPoint: 'main'
-        }
-      });
+        preprocessPipeline = device.createComputePipeline({
+          compute: {
+            module: device.createShaderModule({ code: PREPROCESS_WGSL }),
+            entryPoint: 'main'
+          }
+        });
 
-      postprocessPipeline = device.createComputePipeline({
-        compute: {
-          module: device.createShaderModule({ code: POSTPROCESS_WGSL }),
-          entryPoint: 'main'
-        }
-      });
+        postprocessPipeline = device.createComputePipeline({
+          compute: {
+            module: device.createShaderModule({ code: POSTPROCESS_WGSL }),
+            entryPoint: 'main'
+          }
+        });
 
-      preprocessBuffer = device.createBuffer({
-        size: 224 * 224 * 3 * 4,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_READ
-      });
+        preprocessBuffer = device.createBuffer({
+          size: 224 * 224 * 3 * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_READ
+        });
 
-      postprocessTexture = device.createTexture({
-        size: [224, 224],
-        format: 'rgba8unorm',
-        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
-      });
+        postprocessTexture = device.createTexture({
+          size: [224, 224],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
+        });
 
-      sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+        sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+      } catch (e) {
+        log('initGPU failed: ' + e.message);
+        throw e;
+      }
     }
 
     async function preprocess(cameraTex) {
-      const external = device.importExternalTexture({ source: cameraTex });
-      const bind = device.createBindGroup({
-        layout: preprocessPipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: external },
-          { binding: 1, resource: { buffer: preprocessBuffer } },
-          { binding: 2, resource: sampler }
-        ]
-      });
-      const encoder = device.createCommandEncoder();
-      const pass = encoder.beginComputePass();
-      pass.setPipeline(preprocessPipeline);
-      pass.setBindGroup(0, bind);
-      pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
-      pass.end();
-      queue.submit([encoder.finish()]);
-      await preprocessBuffer.mapAsync(GPUMapMode.READ);
-      const mapped = preprocessBuffer.getMappedRange().slice(0);
-      preprocessBuffer.unmap();
-      return tf.tensor(new Float32Array(mapped), [1, 224, 224, 3]);
+      try {
+        const external = device.importExternalTexture({ source: cameraTex });
+        const bind = device.createBindGroup({
+          layout: preprocessPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: external },
+            { binding: 1, resource: { buffer: preprocessBuffer } },
+            { binding: 2, resource: sampler }
+          ]
+        });
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(preprocessPipeline);
+        pass.setBindGroup(0, bind);
+        pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
+        pass.end();
+        queue.submit([encoder.finish()]);
+        await preprocessBuffer.mapAsync(GPUMapMode.READ);
+        const mapped = preprocessBuffer.getMappedRange().slice(0);
+        preprocessBuffer.unmap();
+        return tf.tensor(new Float32Array(mapped), [1, 224, 224, 3]);
+      } catch (e) {
+        log('preprocess failed: ' + e.message);
+        throw e;
+      }
     }
 
     async function postprocess(maskTensor) {
-      const data = await maskTensor.data();
-      const upload = device.createBuffer({
-        size: data.byteLength,
-        usage: GPUBufferUsage.COPY_SRC,
-        mappedAtCreation: true
-      });
-      new Float32Array(upload.getMappedRange()).set(data);
-      upload.unmap();
-      const maskBuf = device.createBuffer({
-        size: data.byteLength,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-      });
-      const encoder = device.createCommandEncoder();
-      encoder.copyBufferToBuffer(upload, 0, maskBuf, 0, data.byteLength);
-      const bind = device.createBindGroup({
-        layout: postprocessPipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: maskBuf } },
-          { binding: 1, resource: postprocessTexture.createView() }
-        ]
-      });
-      const pass = encoder.beginComputePass();
-      pass.setPipeline(postprocessPipeline);
-      pass.setBindGroup(0, bind);
-      pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
-      pass.end();
-      queue.submit([encoder.finish()]);
-
-      const bitmap = await createImageBitmap(postprocessTexture);
-      maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-      maskCtx.drawImage(bitmap, 0, 0, maskCanvas.width, maskCanvas.height);
+      try {
+        const data = await maskTensor.data();
+        const upload = device.createBuffer({
+          size: data.byteLength,
+          usage: GPUBufferUsage.COPY_SRC,
+          mappedAtCreation: true
+        });
+        new Float32Array(upload.getMappedRange()).set(data);
+        upload.unmap();
+        const maskBuf = device.createBuffer({
+          size: data.byteLength,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+        const encoder = device.createCommandEncoder();
+        encoder.copyBufferToBuffer(upload, 0, maskBuf, 0, data.byteLength);
+        const bind = device.createBindGroup({
+          layout: postprocessPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: maskBuf } },
+            { binding: 1, resource: postprocessTexture.createView() }
+          ]
+        });
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(postprocessPipeline);
+        pass.setBindGroup(0, bind);
+        pass.dispatchWorkgroups(Math.ceil(224 / 8), Math.ceil(224 / 8));
+        pass.end();
+        const readback = device.createBuffer({
+          size: 224 * 224 * 4,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        encoder.copyTextureToBuffer(
+          { texture: postprocessTexture },
+          { buffer: readback, bytesPerRow: 224 * 4 },
+          { width: 224, height: 224, depthOrArrayLayers: 1 }
+        );
+        queue.submit([encoder.finish()]);
+        await readback.mapAsync(GPUMapMode.READ);
+        const array = new Uint8ClampedArray(readback.getMappedRange().slice(0));
+        readback.unmap();
+        const imageData = new ImageData(array, 224, 224);
+        const off = document.createElement('canvas');
+        off.width = 224;
+        off.height = 224;
+        off.getContext('2d').putImageData(imageData, 0, 0);
+        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        maskCtx.drawImage(off, 0, 0, maskCanvas.width, maskCanvas.height);
+      } catch (e) {
+        log('postprocess failed: ' + e.message);
+        throw e;
+      }
     }
 
     async function loadModel() {
       try {
         await tf.setBackend('webgpu');
         await tf.ready();
-        log('Using WebGPU backend\n');
+        log('Using WebGPU backend');
       } catch (e) {
         log('WebGPU init failed, falling back to WebGL...');
         await tf.setBackend('webgl');
         await tf.ready();
-        log('Using WebGL backend\n');
+        log('Using WebGL backend');
       }
       try {
         model = await tf.loadLayersModel('jsModel/model.json');
-        log("Model loaded\n");
+        log('Model loaded');
       } catch (e) {
         log('Model load failed: ' + e.message);
+        throw e;
       }
     }
 
-    function log(msg) {
-      document.getElementById('info').textContent = "Status:\n" + msg;
-    }
-
     async function startAR() {
-      log("Starting AR...");
-      await loadModel();
-      await initGPU();
+      log('Starting AR...');
+      try {
+        await loadModel();
+        await initGPU();
+      } catch (e) {
+        log('Initialization error: ' + e.message);
+        return;
+      }
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
@@ -286,11 +334,7 @@
     }
 
     document.getElementById('startBtn').addEventListener('click', () => {
-      try {
-        startAR();
-      } catch (e) {
-        log('Unexpected error: ' + e.message);
-      }
+      startAR().catch(e => log('Unexpected error: ' + e.message));
     });
   </script>
 </body>
